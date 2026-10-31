@@ -85,6 +85,15 @@ function formatDuration(seconds) {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
+function formatDurationDifference(seconds, todaySeconds) {
+  const difference = Math.round(seconds / 60) - Math.round(todaySeconds / 60);
+  const minutes = Math.abs(difference);
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  const value = [hours && `${hours}h`, (remainder || !hours) && `${remainder}m`].filter(Boolean).join(' ');
+  return `${difference < 0 ? '-' : difference > 0 ? '+' : ''}${value}`;
+}
+
 async function fetchDays(endpoint, start, end, selected, signal) {
   const params = new URLSearchParams({ latitude: selected.lat, longitude: selected.lon, daily: 'sunrise,sunset,daylight_duration', start_date: start, end_date: end, timezone: selected.tz, timeformat: 'unixtime' });
   const response = await fetch(`${endpoint}?${params}`, { signal });
@@ -105,7 +114,7 @@ function svgElement(tag, attributes, text) {
 
 function renderChart(days, today, timeZone) {
   chart.replaceChildren();
-  const width = 700, height = 350, left = 65, right = 12, top = 14, bottom = 34;
+  const width = 700, height = 374, left = 65, right = 12, top = 38, bottom = 34;
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
   const xFor = (index) => left + (index / (days.length - 1)) * plotWidth;
   const yFor = (hours) => top + (hours / 24) * plotHeight;
@@ -170,46 +179,68 @@ function renderChart(days, today, timeZone) {
 
   const todayX = xFor(todayIndex);
   chart.append(svgElement('line', { x1: todayX, y1: top, x2: todayX, y2: top + plotHeight, class: 'today-line' }));
-  const todayPoint = points[todayIndex];
-  if (todayPoint) {
-    const anchor = todayX > left + plotWidth * 0.72 ? 'end' : 'start';
-    const labelX = todayX + (anchor === 'end' ? -7 : 7);
-    for (const key of ['sunrise', 'sunset']) {
-      const y = yFor(todayPoint[key]);
-      chart.append(svgElement('circle', { cx: todayX, cy: y, r: 4, class: `today-point ${key}-point` }));
-      chart.append(svgElement('text', { x: labelX, y: y - 8, 'text-anchor': anchor, class: 'point-label' }, formatTime(days[todayIndex][key], timeZone)));
-    }
-  }
-
   const cursor = svgElement('line', { y1: top, y2: top + plotHeight, class: 'hover-line', visibility: 'hidden' });
-  chart.append(cursor);
+  const marker = svgElement('g', { 'aria-hidden': 'true' });
+  chart.append(cursor, marker);
   const hitArea = svgElement('rect', { x: left, y: top, width: plotWidth, height: plotHeight, class: 'chart-hit', tabindex: '0', role: 'slider', 'aria-label': 'Explore dates', 'aria-valuemin': '1', 'aria-valuemax': days.length });
   chart.append(hitArea);
   let selectedIndex = todayIndex;
+  let exploring = false;
   function selectDay(index) {
     selectedIndex = Math.max(0, Math.min(days.length - 1, index));
     const day = days[selectedIndex];
-    const label = `${formatDate(day.date, { month: 'short', day: 'numeric' })}${day.date === today ? ' · today' : ''}`;
-    const times = hasSunEvents(day) ? `sunrise ${formatTime(day.sunrise, timeZone)} · sunset ${formatTime(day.sunset, timeZone)}` : `${day.duration <= 0 ? 'no sunrise or sunset' : 'midnight sun'} · ${formatDuration(day.duration)} daylight`;
-    const detail = `${label}: ${times}`;
-    $('chart-detail').textContent = detail;
+    const dayOfMonth = Number(day.date.slice(-2));
+    const suffix = dayOfMonth >= 11 && dayOfMonth <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[dayOfMonth % 10] || 'th');
+    const label = `${formatDate(day.date, { month: 'long', day: 'numeric' })}${suffix}`;
+    const times = hasSunEvents(day) ? `sunrise ${formatTime(day.sunrise, timeZone)}, sunset ${formatTime(day.sunset, timeZone)}` : (day.duration <= 0 ? 'no sunrise or sunset' : 'midnight sun');
+    const duration = formatDuration(day.duration);
+    const difference = exploring ? formatDurationDifference(day.duration, days[todayIndex].duration) : '';
+    $('chart-detail').textContent = label;
     hitArea.setAttribute('aria-valuenow', selectedIndex + 1);
-    hitArea.setAttribute('aria-valuetext', detail);
-    cursor.setAttribute('x1', xFor(selectedIndex));
-    cursor.setAttribute('x2', xFor(selectedIndex));
+    hitArea.setAttribute('aria-valuetext', `${label}: ${times}, ${duration} daylight${difference ? `, ${difference} compared with today` : ''}`);
+    const x = xFor(selectedIndex);
+    cursor.setAttribute('x1', x);
+    cursor.setAttribute('x2', x);
     cursor.setAttribute('visibility', selectedIndex === todayIndex ? 'hidden' : 'visible');
+
+    marker.replaceChildren();
+    const dateAnchor = x < left + 90 ? 'start' : x > width - right - 90 ? 'end' : 'middle';
+    marker.append(svgElement('text', { x, y: top - 8, 'text-anchor': dateAnchor, class: 'point-label chart-date' }, label));
+    const point = points[selectedIndex];
+    const labelX = Math.max(left + 45, Math.min(width - right - 45, x));
+    if (point) {
+      for (const key of ['sunrise', 'sunset']) {
+        const y = yFor(point[key]);
+        const above = key === 'sunrise' ? y - top >= 28 : top + plotHeight - y < 28;
+        marker.append(svgElement('circle', { cx: x, cy: y, r: 4, class: `chart-point ${key}-point` }));
+        marker.append(svgElement('text', { x: labelX, y: y + (above ? -8 : 8), 'text-anchor': 'middle', 'dominant-baseline': above ? 'auto' : 'hanging', class: 'point-label' }, formatTime(day[key], timeZone)));
+      }
+    }
+    const durationY = point && point.sunrise <= point.sunset
+      ? (yFor(point.sunrise) + yFor(point.sunset)) / 2
+      : top + plotHeight / 2;
+    const narrowBand = point && Math.abs(yFor(point.sunrise) - yFor(point.sunset)) < 28;
+    const durationAnchor = narrowBand ? (x > left + plotWidth / 2 ? 'end' : 'start') : 'middle';
+    const durationX = narrowBand ? x + (durationAnchor === 'end' ? -10 : 10) : labelX;
+    const durationLabel = svgElement('text', { x: durationX, y: durationY, 'text-anchor': durationAnchor, 'dominant-baseline': 'middle', class: 'point-label daylight-label' }, `${duration}${difference ? ` (${difference})` : ''}`);
+    marker.append(durationLabel);
+    if (!narrowBand) {
+      const halfWidth = Math.max(45, durationLabel.getComputedTextLength() / 2 + 4);
+      durationLabel.setAttribute('x', Math.max(left + halfWidth, Math.min(width - right - halfWidth, x)));
+    }
   }
   selectDay(todayIndex);
   function selectPointerDay(event) {
+    exploring = true;
     const bounds = chart.getBoundingClientRect();
     const x = (event.clientX - bounds.left) * width / bounds.width;
     selectDay(Math.round((x - left) / plotWidth * (days.length - 1)));
   }
   hitArea.addEventListener('pointermove', selectPointerDay);
   hitArea.addEventListener('pointerdown', selectPointerDay);
-  hitArea.addEventListener('pointerleave', (event) => { if (event.pointerType === 'mouse' && document.activeElement !== hitArea) selectDay(todayIndex); });
-  hitArea.addEventListener('focus', () => selectDay(selectedIndex));
-  hitArea.addEventListener('blur', () => selectDay(todayIndex));
+  hitArea.addEventListener('pointerleave', (event) => { if (event.pointerType === 'mouse' && document.activeElement !== hitArea) { exploring = false; selectDay(todayIndex); } });
+  hitArea.addEventListener('focus', () => { exploring = true; selectDay(selectedIndex); });
+  hitArea.addEventListener('blur', () => { exploring = false; selectDay(todayIndex); });
   hitArea.addEventListener('keydown', (event) => {
     let next = selectedIndex;
     if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next--;
