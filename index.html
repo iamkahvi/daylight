@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f9f9f9">
+  <title>daylight hours</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main class="app">
+    <header class="page-header">
+      <h1>daylight hours</h1>
+      <p id="today-label" class="subtitle"></p>
+    </header>
+
+    <section class="today-section" aria-labelledby="today-heading">
+      <h2 id="today-heading">loading daylight times…</h2>
+      <div class="stats" aria-live="polite">
+        <div class="stat"><span class="stat-icon sunrise-icon" aria-hidden="true">↗</span><div><span class="stat-label">sunrise</span><strong id="sunrise">—</strong></div></div>
+        <div class="stat"><span class="stat-icon sunset-icon" aria-hidden="true">↘</span><div><span class="stat-label">sunset</span><strong id="sunset">—</strong></div></div>
+        <div class="stat"><span class="stat-icon daylight-icon" aria-hidden="true">☼</span><div><span class="stat-label">daylight</span><strong id="duration">—</strong></div></div>
+      </div>
+    </section>
+
+    <section class="chart-section" aria-labelledby="chart-title">
+      <div class="chart-heading"><h2 id="chart-title">sunrise &amp; sunset this year</h2><span class="chart-unit">LOCAL TIME</span></div>
+      <p class="chart-description">Sunrise and sunset throughout the year.</p>
+      <div id="chart-wrap" class="chart-wrap" aria-busy="true">
+        <div id="chart-status" class="chart-status" role="status">Loading daylight data…</div>
+        <svg id="chart" role="img" aria-labelledby="chart-title chart-description" hidden></svg>
+        <p id="chart-description" class="sr-only">The upper line shows sunrise and the lower line shows sunset. The dashed line marks today. Focus the chart and use the left and right arrow keys to explore dates.</p>
+      </div>
+      <div class="chart-footer"><span class="legend"><span><i class="legend-dot sunrise-dot"></i> sunrise</span><span><i class="legend-dot sunset-dot"></i> sunset</span></span><span id="chart-detail" aria-live="polite">hover or focus the chart for details</span></div>
+      <button id="retry" class="retry" type="button" hidden>Try again</button>
+    </section>
+
+    <section class="location-section" aria-label="Choose a location">
+      <label for="location-input"><span aria-hidden="true">⌖</span> location</label>
+      <div class="location-control">
+        <input id="location-input" type="text" placeholder="Search city" role="combobox" aria-expanded="false" aria-controls="location-dropdown" aria-autocomplete="list" autocomplete="off" spellcheck="false">
+        <div id="location-dropdown" class="location-dropdown" role="listbox" hidden></div>
+      </div>
+      <p class="location-help">Search for a city to see its local daylight.</p>
+    </section>
+    <footer>Data from <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a></footer>
+  </main>
+</body>
+</html>
