@@ -14,6 +14,22 @@ let searchVersion = 0;
 let loadVersion = 0;
 let loadController;
 let clockTimer;
+let resetChartSelection;
+let outsidePointer;
+
+document.addEventListener('pointerdown', (event) => {
+  if (event.isPrimary && !chart.contains(event.target)) {
+    outsidePointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  }
+});
+document.addEventListener('pointerup', (event) => {
+  if (outsidePointer?.id !== event.pointerId) return;
+  if (Math.hypot(event.clientX - outsidePointer.x, event.clientY - outsidePointer.y) < 10) resetChartSelection?.();
+  outsidePointer = undefined;
+});
+document.addEventListener('pointercancel', (event) => {
+  if (outsidePointer?.id === event.pointerId) outsidePointer = undefined;
+});
 
 function validLocation(value) {
   if (!Number.isFinite(value.lat) || Math.abs(value.lat) > 90 || !Number.isFinite(value.lon) || Math.abs(value.lon) > 180 || !value.tz) return false;
@@ -229,6 +245,7 @@ function renderChart(days, today, timeZone) {
       durationLabel.setAttribute('x', Math.max(left + halfWidth, Math.min(width - right - halfWidth, x)));
     }
   }
+  resetChartSelection = () => { exploring = false; selectDay(todayIndex); };
   selectDay(todayIndex);
   function selectPointerDay(event) {
     exploring = true;
@@ -254,6 +271,7 @@ function renderChart(days, today, timeZone) {
 }
 
 async function load() {
+  resetChartSelection = undefined;
   const selected = { ...currentLocation };
   clearTimeout(clockTimer);
   const version = ++loadVersion;
