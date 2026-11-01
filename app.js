@@ -154,7 +154,10 @@ function renderChart(days, today, timeZone) {
   }
   days.forEach((day, index) => {
     if (day.date.endsWith('-01')) {
-      chart.append(svgElement('text', { x: xFor(index), y: height - 8, 'text-anchor': index === 0 ? 'start' : 'middle', class: 'axis-label' }, formatDate(day.date, { month: 'short' }).toLowerCase()));
+      const x = xFor(index);
+      chart.append(svgElement('line', { x1: x, y1: top, x2: x, y2: top + plotHeight, class: 'month-grid-line' }));
+      chart.append(svgElement('line', { x1: x, y1: top + plotHeight, x2: x, y2: top + plotHeight + 5, class: 'month-tick' }));
+      chart.append(svgElement('text', { x, y: height - 8, 'text-anchor': index === 0 ? 'start' : 'middle', class: 'axis-label' }, formatDate(day.date, { month: 'short' }).toLowerCase()));
     }
   });
 
