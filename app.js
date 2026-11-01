@@ -284,7 +284,6 @@ async function load() {
   const year = Number(today.slice(0, 4));
   const start = `${year}-01-01`;
   const end = `${year}-12-31`;
-  $('today-label').textContent = `${formatDate(today, { weekday: 'long', month: 'long', day: 'numeric' })} · ${selected.name}`;
   $('chart-title').textContent = `sunrise & sunset in ${year}`;
   document.title = `daylight hours - ${selected.name.toLowerCase()}`;
   $('today-heading').textContent = 'loading daylight times…';
