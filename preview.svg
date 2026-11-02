@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">daylight hours</title>
+  <desc id="desc">When is the sun up where you live? An illustration of the sun’s path from sunrise to sunset.</desc>
+  <defs>
+    <radialGradient id="glow">
+      <stop stop-color="#f2d777" stop-opacity=".65"/>
+      <stop offset="1" stop-color="#f2d777" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" fill="#f9f9f7"/>
+  <g font-family="Arial, Helvetica, sans-serif" text-anchor="middle">
+    <text x="600" y="133" font-size="68" font-weight="700" letter-spacing="-2" fill="#333">daylight hours</text>
+    <text x="600" y="185" font-size="28" fill="#898984">when is the sun up where you live</text>
+    <path d="M265 467 Q600 64 935 467 Z" fill="#f8e8a9" fill-opacity=".38"/>
+    <line x1="145" y1="467" x2="1055" y2="467" stroke="#d9d9d2" stroke-width="3"/>
+    <path d="M265 467 Q600 64 935 467" fill="none" stroke="#d5a51a" stroke-width="5"/>
+    <circle cx="600" cy="265.5" r="54" fill="url(#glow)"/>
+    <circle cx="600" cy="265.5" r="15" fill="#fff9df" stroke="#fff" stroke-width="5"/>
+    <circle cx="265" cy="467" r="9" fill="#d5a51a"/>
+    <circle cx="935" cy="467" r="9" fill="#8296ac"/>
+    <text x="265" y="525" font-size="26" fill="#8d8d87">sunrise</text>
+    <text x="935" y="525" font-size="26" fill="#8d8d87">sunset</text>
+  </g>
+</svg>
