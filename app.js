@@ -340,7 +340,9 @@ async function load() {
   const start = `${year}-01-01`;
   const end = `${year}-12-31`;
   $('chart-title').textContent = `sunrise & sunset in ${year}`;
-  $('location-heading').textContent = `${selected.name.split(',')[0].trim().toLowerCase() || 'selected location'} daylight`;
+  $('current-date').dateTime = today;
+  $('current-date').textContent = formatDate(today, { weekday: 'long', month: 'long', day: 'numeric' });
+  $('location-name').textContent = selected.name;
   document.title = `daylight hours - ${selected.name.toLowerCase()}`;
   $('today-heading').textContent = 'loading daylight times…';
   updateDaylightVisual(null, null, null, selected.tz);

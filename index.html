@@ -11,7 +11,10 @@
 </head>
 <body>
   <main class="app">
-    <h1 id="location-heading">daylight</h1>
+    <header class="app-header">
+      <h1>daylight hours</h1>
+      <p class="date-subheading"><time id="current-date"></time> · <span id="location-name"></span></p>
+    </header>
 
     <section class="today-section" aria-labelledby="today-heading">
       <h2 id="today-heading">loading daylight times…</h2>
@@ -51,10 +54,9 @@
         </button>
         <div id="location-dropdown" class="location-dropdown" role="listbox" hidden></div>
       </div>
-      <p class="location-help">Search for a city to see its local daylight.</p>
     </section>
 
-    <footer>Data from <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a></footer>
+    <footer>Data from <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a> · <a href="https://github.com/iamkahvi/daylight" target="_blank" rel="noopener noreferrer" aria-label="Source code on GitHub">src</a> · by kahvi patel</footer>
   </main>
 </body>
 </html>
