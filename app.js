@@ -18,6 +18,8 @@ let loadController;
 let clockTimer;
 let resetChartSelection;
 let redrawChart;
+let chartPreview;
+let updateCurrentVisual;
 let outsidePointer;
 
 const fullscreenLayout = window.matchMedia('(max-width:600px), (max-height:500px) and (pointer:coarse)');
@@ -108,13 +110,13 @@ function formatDuration(seconds) {
 }
 
 // The arc shows elapsed time, not the sun's actual altitude.
-function updateDaylightVisual(day, previousDay, nextDay, timeZone) {
+function updateDaylightVisual(day, previousDay, nextDay, timeZone, preview = false) {
   const hasEvents = hasSunEvents(day);
   const hasDay = hasEvents && day.sunrise < day.sunset;
   const now = Date.now() / 1000;
   const isDaylight = hasDay && now >= day.sunrise && now < day.sunset;
   const isBeforeSunrise = hasDay && now < day.sunrise;
-  const isNight = Boolean((hasDay && !isDaylight) || (day && !hasEvents && day.duration <= 0));
+  const isNight = !preview && Boolean((hasDay && !isDaylight) || (day && !hasEvents && day.duration <= 0));
   // Before sunrise, use the night currently ending; after sunset, use tonight.
   const nightStart = isBeforeSunrise ? previousDay?.sunset : day?.sunset;
   const nightEnd = isBeforeSunrise ? day?.sunrise : nextDay?.sunrise;
@@ -122,6 +124,9 @@ function updateDaylightVisual(day, previousDay, nextDay, timeZone) {
   const start = isNight ? nightStart : day?.sunrise;
   const end = isNight ? nightEnd : day?.sunset;
   const hasPeriod = isNight ? hasNight : hasDay;
+  // Continuous daylight or nighttime has a duration but no event endpoints.
+  const hasContinuousPeriod = Boolean(day && !hasEvents && (isNight || day.duration >= 86400));
+  const hasArc = hasPeriod || hasContinuousPeriod;
   const marker = $('period-marker');
   const visual = document.querySelector('.period-visual');
 
@@ -131,20 +136,35 @@ function updateDaylightVisual(day, previousDay, nextDay, timeZone) {
   $('period-start-time').textContent = !day ? '—' : !hasEvents ? (isNight ? 'No sunset' : 'No sunrise') : formatTime(start, timeZone);
   $('period-end-time').textContent = !day ? '—' : !hasEvents ? (isNight ? 'No sunrise' : 'No sunset') : formatTime(end, timeZone);
   $('period-label').textContent = isNight ? 'nighttime' : 'daylight';
-  $('duration').textContent = !day ? '—' : !hasEvents ? formatDuration(86400)
+  $('duration').textContent = !day ? '—' : !hasEvents ? formatDuration(preview ? day.duration : 86400)
     : isNight ? (hasNight ? formatDuration(end - start) : '—') : formatDuration(day.duration);
-  $('period-state').textContent = !day ? '' : !hasEvents ? (isNight ? 'polar night' : 'midnight sun')
+  const state = !day ? '' : !hasEvents ? (day.duration <= 0 ? 'polar night' : 'midnight sun')
     : !hasDay ? 'events cross midnight' : isNight && !hasNight ? 'unavailable' : '';
+  $('period-state').textContent = [day && formatDate(day.date, { month: 'short', day: 'numeric' }), state].filter(Boolean).join(' · ');
   $('period-detail').textContent = isNight && hasNight ? `From sunset at ${formatTime(start, timeZone)} to ${isBeforeSunrise ? 'today’s' : 'tomorrow’s'} sunrise at ${formatTime(end, timeZone)}.` : '';
-  document.querySelectorAll('.period-arc').forEach((arc) => arc.toggleAttribute('hidden', !hasPeriod));
+  document.querySelectorAll('.period-arc').forEach((arc) => arc.toggleAttribute('hidden', !hasArc));
   $('period-start-point').hidden = $('period-end-point').hidden = !hasPeriod;
-  marker.hidden = !hasPeriod || now < start || now >= end;
-  if (!marker.hidden) {
-    const progress = (now - start) / (end - start);
-    // The quadratic Bézier has a linear x coordinate.
-    marker.style.left = `${(130 + 440 * progress) / 7}%`;
-    marker.style.top = `${(118 - 356 * progress * (1 - progress)) / 1.5}%`;
-  }
+  marker.hidden = preview || !hasPeriod || now < start || now >= end;
+  if (hasArc) {
+    // The arc reaches its maximum width at 18 hours.
+    const seconds = hasContinuousPeriod ? 86400 : isNight ? end - start : day.duration;
+    const maxMinutes = 18 * 60;
+    const width = 440 * Math.min(maxMinutes, Math.max(0, Math.round(seconds / 60))) / maxMinutes;
+    const startX = 350 - width / 2, endX = 350 + width / 2;
+    const path = `M${startX} 118 Q350 -60 ${endX} 118`;
+    document.querySelector('.period-fill').setAttribute('d', `${path} Z`);
+    document.querySelector('.period-curve').setAttribute('d', path);
+    visual.style.setProperty('--period-start-x', `${startX / 7}%`);
+    visual.style.setProperty('--period-end-x', `${endX / 7}%`);
+    // Keep the duration from covering the endpoints on very short arcs.
+    visual.classList.toggle('is-narrow', width / 700 * visual.clientWidth < document.querySelector('.period-duration').offsetWidth + 16);
+    if (!marker.hidden) {
+      const progress = (now - start) / (end - start);
+      // The quadratic Bézier has a linear x coordinate and a fixed height.
+      marker.style.left = `${(startX + width * progress) / 7}%`;
+      marker.style.top = `${(118 - 356 * progress * (1 - progress)) / 1.5}%`;
+    }
+  } else visual.classList.remove('is-narrow');
 }
 
 function formatDurationDifference(seconds, todaySeconds) {
@@ -258,9 +278,14 @@ function renderChart(days, today, timeZone, selection) {
   chart.append(hitArea);
   let selectedIndex = selection?.index ?? todayIndex;
   let exploring = selection?.exploring ?? false;
+  let selectionSource = selection?.source;
+  let restoringFocus = false;
   function selectDay(index) {
     selectedIndex = Math.max(0, Math.min(days.length - 1, index));
     const day = days[selectedIndex];
+    chartPreview = exploring ? day : null;
+    if (chartPreview) updateDaylightVisual(day, null, null, timeZone, true);
+    else updateCurrentVisual?.();
     const dayOfMonth = Number(day.date.slice(-2));
     const suffix = dayOfMonth >= 11 && dayOfMonth <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[dayOfMonth % 10] || 'th');
     const label = `${formatDate(day.date, { month: 'long', day: 'numeric' })}${suffix}`;
@@ -301,19 +326,25 @@ function renderChart(days, today, timeZone, selection) {
       durationLabel.setAttribute('x', Math.max(left + halfWidth, Math.min(width - right - halfWidth, x)));
     }
   }
-  resetChartSelection = () => { exploring = false; selectDay(todayIndex); };
+  resetChartSelection = () => { exploring = false; selectionSource = undefined; selectDay(todayIndex); };
   selectDay(selectedIndex);
   function selectPointerDay(event) {
     exploring = true;
+    selectionSource = 'pointer';
     const bounds = chart.getBoundingClientRect();
     const x = (event.clientX - bounds.left) * width / bounds.width;
     selectDay(Math.round((x - left) / plotWidth * (days.length - 1)));
   }
   hitArea.addEventListener('pointermove', selectPointerDay);
   hitArea.addEventListener('pointerdown', selectPointerDay);
-  hitArea.addEventListener('pointerleave', (event) => { if (event.pointerType === 'mouse' && document.activeElement !== hitArea) { exploring = false; selectDay(todayIndex); } });
-  hitArea.addEventListener('focus', () => { exploring = true; selectDay(selectedIndex); });
-  hitArea.addEventListener('blur', () => { exploring = false; selectDay(todayIndex); });
+  hitArea.addEventListener('pointerleave', (event) => { if (event.pointerType === 'mouse' && selectionSource === 'pointer') resetChartSelection(); });
+  hitArea.addEventListener('focus', () => {
+    if (restoringFocus) return;
+    if (!exploring) selectionSource = 'keyboard';
+    exploring = true;
+    selectDay(selectedIndex);
+  });
+  hitArea.addEventListener('blur', resetChartSelection);
   hitArea.addEventListener('keydown', (event) => {
     let next = selectedIndex;
     if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next--;
@@ -322,17 +353,24 @@ function renderChart(days, today, timeZone, selection) {
     else if (event.key === 'End') next = days.length - 1;
     else return;
     event.preventDefault();
+    exploring = true;
+    selectionSource = 'keyboard';
     selectDay(next);
   });
-  if (selection?.focused) hitArea.focus({ preventScroll: true });
+  if (selection?.focused) {
+    restoringFocus = true;
+    hitArea.focus({ preventScroll: true });
+    restoringFocus = false;
+  }
   redrawChart = () => renderChart(days, today, timeZone, {
-    index: selectedIndex, exploring, focused: document.activeElement === hitArea
+    index: selectedIndex, exploring, source: selectionSource, focused: document.activeElement === hitArea
   });
 }
 
 async function load() {
   resetChartSelection = undefined;
   redrawChart = undefined;
+  chartPreview = null;
   const selected = { ...currentLocation };
   clearTimeout(clockTimer);
   const version = ++loadVersion;
@@ -347,7 +385,8 @@ async function load() {
   $('location-name').textContent = selected.name;
   document.title = `daylight hours - ${selected.name.toLowerCase()}`;
   $('today-heading').textContent = 'loading daylight times…';
-  updateDaylightVisual(null, null, null, selected.tz);
+  updateCurrentVisual = () => updateDaylightVisual(null, null, null, selected.tz);
+  updateCurrentVisual();
   $('chart-detail').textContent = 'hover or focus the chart for details';
   chart.setAttribute('hidden', '');
   $('chart-status').textContent = 'Loading daylight data…';
@@ -368,13 +407,19 @@ async function load() {
   if (forecast.status === 'fulfilled' && forecast.value.length === 3 && forecast.value.slice(1).every(validDay)) {
     const [previousDay, todayData, nextDay] = forecast.value;
     currentDay = todayData;
-    scheduleClock(today, currentDay, validDay(previousDay) ? previousDay : null, nextDay, selected.tz);
+    const previous = validDay(previousDay) ? previousDay : null;
+    updateCurrentVisual = () => updateDaylightVisual(currentDay, previous, nextDay, selected.tz);
+    scheduleClock(today, currentDay, nextDay, selected.tz);
   } else {
     console.error('Could not load today’s daylight data:', forecast.reason || 'Incomplete data');
     $('today-heading').textContent = 'daylight times unavailable';
-    $('period-state').textContent = 'unavailable';
+    updateCurrentVisual = () => {
+      updateDaylightVisual(null, null, null, selected.tz);
+      $('period-state').textContent = 'unavailable';
+    };
+    updateCurrentVisual();
     $('retry').hidden = false;
-    scheduleClock(today, null, null, null, selected.tz);
+    scheduleClock(today, null, null, selected.tz);
   }
   const expectedCount = (Date.parse(`${year + 1}-01-01T00:00:00Z`) - Date.parse(`${year}-01-01T00:00:00Z`)) / 86400000;
   if (annual.status === 'fulfilled' && annual.value.length === expectedCount && annual.value.every(validDay)) {
@@ -392,14 +437,14 @@ async function load() {
   $('chart-wrap').setAttribute('aria-busy', 'false');
 }
 
-function scheduleClock(date, currentDay, previousDay, nextDay, timeZone) {
+function scheduleClock(date, currentDay, nextDay, timeZone) {
   clearTimeout(clockTimer);
   if (todayIn(timeZone) !== date) { load(); return; }
   if (currentDay) {
     updateHeading(currentDay, nextDay);
-    updateDaylightVisual(currentDay, previousDay, nextDay, timeZone);
+    if (!chartPreview) updateCurrentVisual();
   }
-  clockTimer = setTimeout(() => scheduleClock(date, currentDay, previousDay, nextDay, timeZone), currentDay ? 1000 : 60000);
+  clockTimer = setTimeout(() => scheduleClock(date, currentDay, nextDay, timeZone), currentDay ? 1000 : 60000);
 }
 
 function closeDropdown() {

@@ -4,7 +4,9 @@ This web app shows sunrise, sunset, and daylight duration for a selected locatio
 
 ![Daylight hours app showing sunrise, sunset, and the annual daylight chart](docs/screenshot.png)
 
-The heading shows the time until the next sunrise or sunset. It uses the clock on your device. The arc shows elapsed time through the current day or night, not the sun’s actual position. At night, its duration runs from sunset to the next sunrise.
+The heading shows the time until the next sunrise or sunset. It uses the clock on your device. The arc widens with the displayed duration, reaching its maximum width at 18 hours; its marker shows elapsed time through the current day or night, not the sun’s actual position. At night, its duration runs from sunset to the next sunrise.
+
+Hover over or touch the yearly chart to show that date’s sunrise, sunset, and daylight duration in the top card. You can also focus the chart and use the arrow keys. The countdown stays on the current day; the card returns to the current day or night when you leave the chart or tap outside it. The elapsed-time marker is hidden while exploring the chart.
 
 Search for a city to select a location. The URL then includes the location parameters `lat`, `lon`, `tz`, and `n`. You can share this URL.
 
