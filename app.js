@@ -3,6 +3,8 @@
 const DEFAULT_LOCATION = { name: 'Victoria, British Columbia, Canada', lat: 48.4284, lon: -123.3656, tz: 'America/Vancouver' };
 const $ = (id) => document.getElementById(id);
 const input = $('location-input');
+const clearLocation = $('location-clear');
+const locationControl = document.querySelector('.location-control');
 const dropdown = $('location-dropdown');
 const chart = $('chart');
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -15,7 +17,11 @@ let loadVersion = 0;
 let loadController;
 let clockTimer;
 let resetChartSelection;
+let redrawChart;
 let outsidePointer;
+
+const fullscreenLayout = window.matchMedia('(max-width:600px), (max-height:500px) and (pointer:coarse)');
+new ResizeObserver(() => redrawChart?.()).observe($('chart-wrap'));
 
 document.addEventListener('pointerdown', (event) => {
   if (event.isPrimary && !chart.contains(event.target)) {
@@ -68,11 +74,11 @@ function formatTime(timestamp, timeZone) {
 }
 
 function formatCountdown(milliseconds) {
-  if (milliseconds <= 60000) return 'less than a minute';
-  const minutes = Math.ceil(milliseconds / 60000);
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return [hours && `${hours} ${hours === 1 ? 'hour' : 'hours'}`, remainder && `${remainder} ${remainder === 1 ? 'minute' : 'minutes'}`].filter(Boolean).join(' ');
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor(totalSeconds % 3600 / 60);
+  const seconds = totalSeconds % 60;
+  return [hours && `${hours}h`, (hours || minutes) && `${minutes}m`, `${seconds}s`].filter(Boolean).join(' ');
 }
 
 function hasSunEvents(day) {
@@ -85,11 +91,11 @@ function updateHeading(today, tomorrow) {
   if (!hasSunEvents(today)) {
     heading.textContent = today.duration <= 0 ? 'the sun won’t rise today' : 'the sun won’t set today';
   } else if (now < today.sunrise * 1000) {
-    heading.textContent = `today’s sunrise is in ${formatCountdown(today.sunrise * 1000 - now)}`;
+    heading.textContent = `sunrise is in ${formatCountdown(today.sunrise * 1000 - now)}`;
   } else if (now < today.sunset * 1000) {
-    heading.textContent = `today’s sunset is in ${formatCountdown(today.sunset * 1000 - now)}`;
+    heading.textContent = `sunset is in ${formatCountdown(today.sunset * 1000 - now)}`;
   } else if (hasSunEvents(tomorrow)) {
-    heading.textContent = `tomorrow’s sunrise is in ${formatCountdown(tomorrow.sunrise * 1000 - now)}`;
+    heading.textContent = `sunrise is in ${formatCountdown(tomorrow.sunrise * 1000 - now)}`;
   } else {
     heading.textContent = 'the sun won’t rise tomorrow';
   }
@@ -168,9 +174,13 @@ function svgElement(tag, attributes, text) {
   return element;
 }
 
-function renderChart(days, today, timeZone) {
+function renderChart(days, today, timeZone, selection) {
   chart.replaceChildren();
-  const width = 700, height = 374, left = 65, right = 12, top = 38, bottom = 34;
+  const width = 700, left = 65, right = 12;
+  const bounds = $('chart-wrap').getBoundingClientRect();
+  // Match the available aspect ratio without stretching text or strokes.
+  const height = fullscreenLayout.matches && bounds.width && bounds.height ? width * bounds.height / bounds.width : 374;
+  const top = Math.min(38, height / 4), bottom = Math.min(34, height / 4);
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
   const xFor = (index) => left + (index / (days.length - 1)) * plotWidth;
   const yFor = (hours) => top + (hours / 24) * plotHeight;
@@ -243,8 +253,8 @@ function renderChart(days, today, timeZone) {
   chart.append(cursor, marker);
   const hitArea = svgElement('rect', { x: left, y: top, width: plotWidth, height: plotHeight, class: 'chart-hit', tabindex: '0', role: 'slider', 'aria-label': 'Explore dates', 'aria-valuemin': '1', 'aria-valuemax': days.length });
   chart.append(hitArea);
-  let selectedIndex = todayIndex;
-  let exploring = false;
+  let selectedIndex = selection?.index ?? todayIndex;
+  let exploring = selection?.exploring ?? false;
   function selectDay(index) {
     selectedIndex = Math.max(0, Math.min(days.length - 1, index));
     const day = days[selectedIndex];
@@ -289,7 +299,7 @@ function renderChart(days, today, timeZone) {
     }
   }
   resetChartSelection = () => { exploring = false; selectDay(todayIndex); };
-  selectDay(todayIndex);
+  selectDay(selectedIndex);
   function selectPointerDay(event) {
     exploring = true;
     const bounds = chart.getBoundingClientRect();
@@ -311,10 +321,15 @@ function renderChart(days, today, timeZone) {
     event.preventDefault();
     selectDay(next);
   });
+  if (selection?.focused) hitArea.focus({ preventScroll: true });
+  redrawChart = () => renderChart(days, today, timeZone, {
+    index: selectedIndex, exploring, focused: document.activeElement === hitArea
+  });
 }
 
 async function load() {
   resetChartSelection = undefined;
+  redrawChart = undefined;
   const selected = { ...currentLocation };
   clearTimeout(clockTimer);
   const version = ++loadVersion;
@@ -325,6 +340,7 @@ async function load() {
   const start = `${year}-01-01`;
   const end = `${year}-12-31`;
   $('chart-title').textContent = `sunrise & sunset in ${year}`;
+  $('location-heading').textContent = `${selected.name.split(',')[0].trim().toLowerCase() || 'selected location'} daylight`;
   document.title = `daylight hours - ${selected.name.toLowerCase()}`;
   $('today-heading').textContent = 'loading daylight times…';
   updateDaylightVisual(null, null, null, selected.tz);
@@ -470,8 +486,17 @@ input.addEventListener('keydown', (event) => {
     selectLocation(results[activeIndex]);
   }
 });
+clearLocation.addEventListener('pointerdown', (event) => event.preventDefault());
+clearLocation.addEventListener('click', () => {
+  input.value = '';
+  input.focus();
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+});
 document.addEventListener('click', (event) => { if (!event.target.closest('.location-control')) { clearTimeout(debounce); searchVersion++; closeDropdown(); input.value = currentLocation.name; } });
-input.addEventListener('blur', () => { clearTimeout(debounce); searchVersion++; closeDropdown(); input.value = currentLocation.name; });
+locationControl.addEventListener('focusout', (event) => {
+  if (locationControl.contains(event.relatedTarget)) return;
+  clearTimeout(debounce); searchVersion++; closeDropdown(); input.value = currentLocation.name;
+});
 $('retry').addEventListener('click', load);
 window.addEventListener('popstate', () => { clearTimeout(debounce); searchVersion++; closeDropdown(); currentLocation = locationFromUrl(); input.value = currentLocation.name; load(); });
 currentLocation = locationFromUrl();
