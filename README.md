@@ -4,7 +4,7 @@ This web app shows sunrise, sunset, and daylight duration for a selected locatio
 
 ![Daylight hours app showing sunrise, sunset, and the annual daylight chart](docs/screenshot.png)
 
-The heading shows the time until the next sunrise or sunset. It uses the clock on your device.
+The heading shows the time until the next sunrise or sunset. It uses the clock on your device. The arc shows elapsed time through the current day or night, not the sun’s actual position. At night, its duration runs from sunset to the next sunrise.
 
 Search for a city to select a location. The URL then includes the location parameters `lat`, `lon`, `tz`, and `n`. You can share this URL.
 
@@ -20,6 +20,6 @@ Search for a city to select a location. The URL then includes the location param
 
 ## Data
 
-You need an internet connection to get data from Open-Meteo. The forecast API gives data for today and tomorrow. The climate API gives data for the current year.
+You need an internet connection to get data from Open-Meteo. The forecast API gives data for yesterday, today, and tomorrow. The climate API gives data for the current year.
 
 The sunrise and sunset times are astronomical. Clouds do not change these times. The grid positions for the two APIs can be different. For today, the chart uses data from the forecast API. Gaps in the chart show days without sunrise or sunset.

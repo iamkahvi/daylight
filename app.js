@@ -101,6 +101,46 @@ function formatDuration(seconds) {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
+// The arc shows elapsed time, not the sun's actual altitude.
+function updateDaylightVisual(day, previousDay, nextDay, timeZone) {
+  const hasEvents = hasSunEvents(day);
+  const hasDay = hasEvents && day.sunrise < day.sunset;
+  const now = Date.now() / 1000;
+  const isDaylight = hasDay && now >= day.sunrise && now < day.sunset;
+  const isBeforeSunrise = hasDay && now < day.sunrise;
+  const isNight = Boolean((hasDay && !isDaylight) || (day && !hasEvents && day.duration <= 0));
+  // Before sunrise, use the night currently ending; after sunset, use tonight.
+  const nightStart = isBeforeSunrise ? previousDay?.sunset : day?.sunset;
+  const nightEnd = isBeforeSunrise ? day?.sunrise : nextDay?.sunrise;
+  const hasNight = hasDay && Number.isFinite(nightStart) && Number.isFinite(nightEnd) && nightEnd > nightStart;
+  const start = isNight ? nightStart : day?.sunrise;
+  const end = isNight ? nightEnd : day?.sunset;
+  const hasPeriod = isNight ? hasNight : hasDay;
+  const marker = $('period-marker');
+  const visual = document.querySelector('.period-visual');
+
+  visual.classList.toggle('is-night', isNight);
+  $('period-start-label').textContent = isNight ? 'sunset' : 'sunrise';
+  $('period-end-label').textContent = isNight ? 'sunrise' : 'sunset';
+  $('period-start-time').textContent = !day ? '—' : !hasEvents ? (isNight ? 'No sunset' : 'No sunrise') : formatTime(start, timeZone);
+  $('period-end-time').textContent = !day ? '—' : !hasEvents ? (isNight ? 'No sunrise' : 'No sunset') : formatTime(end, timeZone);
+  $('period-label').textContent = isNight ? 'nighttime' : 'daylight';
+  $('duration').textContent = !day ? '—' : !hasEvents ? formatDuration(86400)
+    : isNight ? (hasNight ? formatDuration(end - start) : '—') : formatDuration(day.duration);
+  $('period-state').textContent = !day ? '' : !hasEvents ? (isNight ? 'polar night' : 'midnight sun')
+    : !hasDay ? 'events cross midnight' : isNight ? (hasNight ? (isBeforeSunrise ? 'overnight' : 'tonight') : 'unavailable') : '';
+  $('period-detail').textContent = isNight && hasNight ? `From sunset at ${formatTime(start, timeZone)} to ${isBeforeSunrise ? 'today’s' : 'tomorrow’s'} sunrise at ${formatTime(end, timeZone)}.` : '';
+  document.querySelectorAll('.period-arc').forEach((arc) => arc.toggleAttribute('hidden', !hasPeriod));
+  $('period-start-point').hidden = $('period-end-point').hidden = !hasPeriod;
+  marker.hidden = !hasPeriod || now < start || now >= end;
+  if (!marker.hidden) {
+    const progress = (now - start) / (end - start);
+    // The quadratic Bézier has a linear x coordinate.
+    marker.style.left = `${(130 + 440 * progress) / 7}%`;
+    marker.style.top = `${(118 - 356 * progress * (1 - progress)) / 1.5}%`;
+  }
+}
+
 function formatDurationDifference(seconds, todaySeconds) {
   const difference = Math.round(seconds / 60) - Math.round(todaySeconds / 60);
   const minutes = Math.abs(difference);
@@ -287,7 +327,7 @@ async function load() {
   $('chart-title').textContent = `sunrise & sunset in ${year}`;
   document.title = `daylight hours - ${selected.name.toLowerCase()}`;
   $('today-heading').textContent = 'loading daylight times…';
-  $('sunrise').textContent = $('sunset').textContent = $('duration').textContent = '—';
+  updateDaylightVisual(null, null, null, selected.tz);
   $('chart-detail').textContent = 'hover or focus the chart for details';
   chart.setAttribute('hidden', '');
   $('chart-status').textContent = 'Loading daylight data…';
@@ -297,7 +337,7 @@ async function load() {
   // The forecast endpoint cannot cover a full year. Its climate endpoint can,
   // and both return astronomical sunrise and sunset rather than weather data.
   const requests = [
-    fetchDays('https://api.open-meteo.com/v1/forecast', today, addDays(today, 1), selected, loadController.signal),
+    fetchDays('https://api.open-meteo.com/v1/forecast', addDays(today, -1), addDays(today, 1), selected, loadController.signal),
     fetchDays('https://climate-api.open-meteo.com/v1/climate', start, end, selected, loadController.signal)
   ];
   const [forecast, annual] = await Promise.allSettled(requests);
@@ -305,19 +345,16 @@ async function load() {
   const validDay = (day) => day && Number.isFinite(day.duration) &&
     (day.duration <= 0 || day.duration >= 86400 || hasSunEvents(day));
   let currentDay;
-  if (forecast.status === 'fulfilled' && forecast.value.length === 2 && forecast.value.every(validDay)) {
-    const [todayData, nextDay] = forecast.value;
+  if (forecast.status === 'fulfilled' && forecast.value.length === 3 && forecast.value.slice(1).every(validDay)) {
+    const [previousDay, todayData, nextDay] = forecast.value;
     currentDay = todayData;
-    const polar = currentDay.duration <= 0 || currentDay.duration >= 86400;
-    $('sunrise').textContent = polar ? 'No sunrise' : formatTime(currentDay.sunrise, selected.tz);
-    $('sunset').textContent = polar ? 'No sunset' : formatTime(currentDay.sunset, selected.tz);
-    $('duration').textContent = formatDuration(currentDay.duration);
-    scheduleClock(today, currentDay, nextDay, selected.tz);
+    scheduleClock(today, currentDay, validDay(previousDay) ? previousDay : null, nextDay, selected.tz);
   } else {
     console.error('Could not load today’s daylight data:', forecast.reason || 'Incomplete data');
     $('today-heading').textContent = 'daylight times unavailable';
+    $('period-state').textContent = 'unavailable';
     $('retry').hidden = false;
-    scheduleClock(today, null, null, selected.tz);
+    scheduleClock(today, null, null, null, selected.tz);
   }
   const expectedCount = (Date.parse(`${year + 1}-01-01T00:00:00Z`) - Date.parse(`${year}-01-01T00:00:00Z`)) / 86400000;
   if (annual.status === 'fulfilled' && annual.value.length === expectedCount && annual.value.every(validDay)) {
@@ -335,11 +372,14 @@ async function load() {
   $('chart-wrap').setAttribute('aria-busy', 'false');
 }
 
-function scheduleClock(date, currentDay, nextDay, timeZone) {
+function scheduleClock(date, currentDay, previousDay, nextDay, timeZone) {
   clearTimeout(clockTimer);
   if (todayIn(timeZone) !== date) { load(); return; }
-  if (currentDay) updateHeading(currentDay, nextDay);
-  clockTimer = setTimeout(() => scheduleClock(date, currentDay, nextDay, timeZone), currentDay ? 1000 : 60000);
+  if (currentDay) {
+    updateHeading(currentDay, nextDay);
+    updateDaylightVisual(currentDay, previousDay, nextDay, timeZone);
+  }
+  clockTimer = setTimeout(() => scheduleClock(date, currentDay, previousDay, nextDay, timeZone), currentDay ? 1000 : 60000);
 }
 
 function closeDropdown() {

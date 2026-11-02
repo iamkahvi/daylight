@@ -15,10 +15,19 @@
 
     <section class="today-section" aria-labelledby="today-heading">
       <h2 id="today-heading">loading daylight times…</h2>
-      <div class="stats" aria-live="polite">
-        <div class="stat"><span class="stat-icon sunrise-icon" aria-hidden="true">↗</span><div><span class="stat-label">sunrise</span><strong id="sunrise">—</strong></div></div>
-        <div class="stat"><span class="stat-icon sunset-icon" aria-hidden="true">↘</span><div><span class="stat-label">sunset</span><strong id="sunset">—</strong></div></div>
-        <div class="stat"><span class="stat-icon daylight-icon" aria-hidden="true">☼</span><div><span class="stat-label">daylight</span><strong id="duration">—</strong></div></div>
+      <div class="period-visual">
+        <svg class="period-path" viewBox="0 0 700 150" preserveAspectRatio="none" aria-hidden="true">
+          <path class="period-arc period-fill" d="M130 118 Q350 -60 570 118 Z" hidden></path>
+          <line class="period-horizon" x1="18" y1="118" x2="682" y2="118"></line>
+          <path class="period-arc period-curve" d="M130 118 Q350 -60 570 118" hidden></path>
+        </svg>
+        <span id="period-start-point" class="horizon-point horizon-start" aria-hidden="true" hidden></span>
+        <span id="period-end-point" class="horizon-point horizon-end" aria-hidden="true" hidden></span>
+        <span id="period-marker" class="period-marker" aria-hidden="true" hidden></span>
+        <div class="period-time period-start"><span id="period-start-label">sunrise</span><strong id="period-start-time">—</strong></div>
+        <div class="period-duration"><strong id="duration">—</strong><span id="period-label">daylight</span><span id="period-state"></span><span id="period-detail" class="sr-only"></span></div>
+        <div class="period-time period-end"><span id="period-end-label">sunset</span><strong id="period-end-time">—</strong></div>
+        <p class="sr-only">The marker shows time elapsed through the day or night, not the sun’s actual position. Nighttime is measured from sunset to the next sunrise.</p>
       </div>
     </section>
 
