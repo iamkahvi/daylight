@@ -176,17 +176,6 @@ function formatDurationDifference(seconds, todaySeconds) {
   return `${difference < 0 ? '-' : difference > 0 ? '+' : ''}${value}`;
 }
 
-async function fetchDays(endpoint, start, end, selected, signal) {
-  const params = new URLSearchParams({ latitude: selected.lat, longitude: selected.lon, daily: 'sunrise,sunset,daylight_duration', start_date: start, end_date: end, timezone: selected.tz, timeformat: 'unixtime' });
-  const response = await fetch(`${endpoint}?${params}`, { signal });
-  if (!response.ok) throw new Error(`Open-Meteo returned ${response.status}`);
-  const data = await response.json();
-  if (!data.daily || !Array.isArray(data.daily.time) || !Array.isArray(data.daily.daylight_duration)) throw new Error('Open-Meteo returned incomplete data');
-  // Daily timestamps use a fixed offset across DST transitions; the requested
-  // start date and array index reliably identify each local calendar day.
-  return data.daily.time.map((_, i) => ({ date: addDays(start, i), sunrise: data.daily.sunrise?.[i], sunset: data.daily.sunset?.[i], duration: data.daily.daylight_duration[i] }));
-}
-
 function svgElement(tag, attributes, text) {
   const element = document.createElementNS(SVG_NS, tag);
   for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
@@ -393,48 +382,51 @@ async function load() {
   $('chart-status').hidden = false;
   $('chart-wrap').setAttribute('aria-busy', 'true');
   $('retry').hidden = true;
-  // The forecast endpoint cannot cover a full year. Its climate endpoint can,
-  // and both return astronomical sunrise and sunset rather than weather data.
-  const requests = [
-    fetchDays('https://api.open-meteo.com/v1/forecast', addDays(today, -1), addDays(today, 1), selected, loadController.signal),
-    fetchDays('https://climate-api.open-meteo.com/v1/climate', start, end, selected, loadController.signal)
-  ];
-  const [forecast, annual] = await Promise.allSettled(requests);
-  if (version !== loadVersion) return;
-  const validDay = (day) => day && Number.isFinite(day.duration) &&
-    (day.duration <= 0 || day.duration >= 86400 || hasSunEvents(day));
-  let currentDay;
-  if (forecast.status === 'fulfilled' && forecast.value.length === 3 && forecast.value.slice(1).every(validDay)) {
-    const [previousDay, todayData, nextDay] = forecast.value;
-    currentDay = todayData;
-    const previous = validDay(previousDay) ? previousDay : null;
-    updateCurrentVisual = () => updateDaylightVisual(currentDay, previous, nextDay, selected.tz);
-    scheduleClock(today, currentDay, nextDay, selected.tz);
-  } else {
-    console.error('Could not load today’s daylight data:', forecast.reason || 'Incomplete data');
-    $('today-heading').textContent = 'daylight times unavailable';
-    updateCurrentVisual = () => {
-      updateDaylightVisual(null, null, null, selected.tz);
-      $('period-state').textContent = 'unavailable';
-    };
-    updateCurrentVisual();
-    $('retry').hidden = false;
-    scheduleClock(today, null, null, selected.tz);
-  }
-  const expectedCount = (Date.parse(`${year + 1}-01-01T00:00:00Z`) - Date.parse(`${year}-01-01T00:00:00Z`)) / 86400000;
-  if (annual.status === 'fulfilled' && annual.value.length === expectedCount && annual.value.every(validDay)) {
-    const days = annual.value;
-    // Use the same values as the card for today's marker; model grids differ.
-    if (currentDay) days[days.findIndex((day) => day.date === today)] = currentDay;
-    renderChart(days, today, selected.tz);
-    $('chart-status').hidden = true;
-    chart.removeAttribute('hidden');
-  } else {
-    console.error('Could not load annual daylight data:', annual.reason || 'Incomplete data');
-    $('chart-status').textContent = 'Couldn’t load yearly daylight data. Check your connection and try again.';
-    $('retry').hidden = false;
-  }
-  $('chart-wrap').setAttribute('aria-busy', 'false');
+  // Providers share the same normalized day contract. Add or reorder adapters here.
+  const { openMeteo, weatherApi, localSolar, getDaysWithFallback } = DaylightProviders;
+  let currentDay, annualDays;
+  const forecast = getDaysWithFallback([openMeteo, weatherApi(window.DAYLIGHT_CONFIG?.weatherApiKey), localSolar], addDays(today, -1), addDays(today, 1), selected, loadController.signal, 'forecast')
+    .then(({ days }) => {
+      if (version !== loadVersion) return;
+      const [previousDay, todayData, nextDay] = days;
+      currentDay = todayData;
+      updateCurrentVisual = () => updateDaylightVisual(currentDay, previousDay, nextDay, selected.tz);
+      scheduleClock(today, currentDay, nextDay, selected.tz);
+      if (version !== loadVersion) return;
+      if (annualDays) {
+        annualDays[annualDays.findIndex((day) => day.date === today)] = currentDay;
+        redrawChart?.();
+      }
+    }).catch((error) => {
+      if (version !== loadVersion) return;
+      console.error('Could not load today’s daylight data:', error);
+      $('today-heading').textContent = 'daylight times unavailable';
+      updateCurrentVisual = () => {
+        updateDaylightVisual(null, null, null, selected.tz);
+        $('period-state').textContent = 'unavailable';
+      };
+      updateCurrentVisual();
+      $('retry').hidden = false;
+      scheduleClock(today, null, null, selected.tz);
+    });
+  const annual = getDaysWithFallback([openMeteo, localSolar], start, end, selected, loadController.signal, 'annual')
+    .then(({ days }) => {
+      if (version !== loadVersion) return;
+      annualDays = days;
+      // Use the same values as the card for today's marker; model grids differ.
+      if (currentDay) days[days.findIndex((day) => day.date === today)] = currentDay;
+      renderChart(days, today, selected.tz);
+      $('chart-status').hidden = true;
+      chart.removeAttribute('hidden');
+      $('chart-wrap').setAttribute('aria-busy', 'false');
+    }).catch((error) => {
+      if (version !== loadVersion) return;
+      console.error('Could not load annual daylight data:', error);
+      $('chart-status').textContent = 'Couldn’t load yearly daylight data. Check your connection and try again.';
+      $('retry').hidden = false;
+      $('chart-wrap').setAttribute('aria-busy', 'false');
+    });
+  await Promise.all([forecast, annual]);
 }
 
 function scheduleClock(date, currentDay, nextDay, timeZone) {
