@@ -128,7 +128,7 @@ function updateDaylightVisual(day, previousDay, nextDay, timeZone) {
   $('duration').textContent = !day ? '—' : !hasEvents ? formatDuration(86400)
     : isNight ? (hasNight ? formatDuration(end - start) : '—') : formatDuration(day.duration);
   $('period-state').textContent = !day ? '' : !hasEvents ? (isNight ? 'polar night' : 'midnight sun')
-    : !hasDay ? 'events cross midnight' : isNight ? (hasNight ? (isBeforeSunrise ? 'overnight' : 'tonight') : 'unavailable') : '';
+    : !hasDay ? 'events cross midnight' : isNight && !hasNight ? 'unavailable' : '';
   $('period-detail').textContent = isNight && hasNight ? `From sunset at ${formatTime(start, timeZone)} to ${isBeforeSunrise ? 'today’s' : 'tomorrow’s'} sunrise at ${formatTime(end, timeZone)}.` : '';
   document.querySelectorAll('.period-arc').forEach((arc) => arc.toggleAttribute('hidden', !hasPeriod));
   $('period-start-point').hidden = $('period-end-point').hidden = !hasPeriod;
