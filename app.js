@@ -196,11 +196,14 @@ function renderChart(days, today, timeZone, selection) {
   chart.setAttribute('viewBox', `0 0 ${width} ${height}`);
   chart.setAttribute('role', 'group');
 
+  let compactTimeLabels = false;
   for (let hours = 0; hours <= 24; hours += 3) {
     const y = yFor(hours);
     const label = hours === 0 || hours === 24 ? '12 am' : hours === 12 ? '12 pm' : `${hours % 12} ${hours < 12 ? 'am' : 'pm'}`;
-    chart.append(svgElement('line', { x1: left, y1: y, x2: width - right, y2: y, class: 'grid-line' }));
-    chart.append(svgElement('text', { x: left - 8, y: y + 4, 'text-anchor': 'end', class: 'axis-label' }, label));
+    const text = svgElement('text', { x: left - 8, y: y + 4, 'text-anchor': 'end', class: 'axis-label' }, label);
+    chart.append(svgElement('line', { x1: left, y1: y, x2: width - right, y2: y, class: 'grid-line' }), text);
+    if (hours === 0) compactTimeLabels = plotHeight / 8 < parseFloat(getComputedStyle(text).fontSize) * 1.2;
+    if (compactTimeLabels && hours % 6 !== 0) text.setAttribute('visibility', 'hidden');
   }
   days.forEach((day, index) => {
     if (day.date.endsWith('-01')) {
@@ -339,7 +342,6 @@ async function load() {
   const year = Number(today.slice(0, 4));
   const start = `${year}-01-01`;
   const end = `${year}-12-31`;
-  $('chart-title').textContent = `sunrise & sunset in ${year}`;
   $('current-date').dateTime = today;
   $('current-date').textContent = formatDate(today, { weekday: 'long', month: 'long', day: 'numeric' });
   $('location-name').textContent = selected.name;
