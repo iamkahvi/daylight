@@ -10,6 +10,8 @@ Hover over or touch the yearly chart to show that date’s sunrise, sunset, and 
 
 Search for a city to select a location. The URL then includes the location parameters `lat`, `lon`, `tz`, and `n`. You can share this URL.
 
+The theme follows your system setting until you use the button in the top right. Your chosen light or dark theme is saved in your browser and does not affect the shared location URL.
+
 ## Start the app
 
 1. Start a static web server in the project directory. For example:

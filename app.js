@@ -77,10 +77,10 @@ function formatTime(timestamp, timeZone) {
 
 function formatCountdown(milliseconds) {
   const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor(totalSeconds % 3600 / 60);
-  const seconds = totalSeconds % 60;
-  return [hours && `${hours}h`, (hours || minutes) && `${minutes}m`, `${seconds}s`].filter(Boolean).join(' ');
+  const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+  const minutes = String(Math.floor(totalSeconds % 3600 / 60)).padStart(2, '0');
+  const seconds = String(totalSeconds % 60).padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
 }
 
 function hasSunEvents(day) {
@@ -90,21 +90,28 @@ function hasSunEvents(day) {
 function updateHeading(today, tomorrow) {
   const heading = $('today-heading');
   const now = Date.now();
+  function showCountdown(type, time) {
+    const countdown = document.createElement('span');
+    countdown.className = 'countdown';
+    countdown.textContent = formatCountdown(time * 1000 - now);
+    heading.replaceChildren(`${type} is in `, countdown);
+  }
   // Near the polar circles, only one event may occur, or sunset may precede
   // sunrise within a local calendar day. Use the actual event order there.
   if (today.duration === null || tomorrow.duration === null || (hasSunEvents(today) && today.sunrise > today.sunset)) {
     const events = [today, tomorrow].flatMap((day) => hasSunEvents(day) || day.duration === null
       ? ['sunrise', 'sunset'].filter((type) => Number.isFinite(day[type]) && day[type] * 1000 > now).map((type) => ({ type, time: day[type] })) : []);
     events.sort((a, b) => a.time - b.time);
-    heading.textContent = events.length ? `${events[0].type} is in ${formatCountdown(events[0].time * 1000 - now)}` : 'next sunrise or sunset unavailable';
+    if (events.length) showCountdown(events[0].type, events[0].time);
+    else heading.textContent = 'next sunrise or sunset unavailable';
   } else if (!hasSunEvents(today)) {
     heading.textContent = today.duration <= 0 ? 'the sun won’t rise today' : 'the sun won’t set today';
   } else if (now < today.sunrise * 1000) {
-    heading.textContent = `sunrise is in ${formatCountdown(today.sunrise * 1000 - now)}`;
+    showCountdown('sunrise', today.sunrise);
   } else if (now < today.sunset * 1000) {
-    heading.textContent = `sunset is in ${formatCountdown(today.sunset * 1000 - now)}`;
+    showCountdown('sunset', today.sunset);
   } else if (hasSunEvents(tomorrow)) {
-    heading.textContent = `sunrise is in ${formatCountdown(tomorrow.sunrise * 1000 - now)}`;
+    showCountdown('sunrise', tomorrow.sunrise);
   } else {
     heading.textContent = 'the sun won’t rise tomorrow';
   }

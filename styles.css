@@ -50,3 +50,66 @@
   .chart-section { grid-column:2; grid-row:2; margin:0 }
   footer { grid-column:1 / -1; grid-row:4; margin:0 }
 }
+
+.countdown { display:inline-block; padding:.12em .3em; border-radius:.32em; background:#e8ebee; color:#1b1b1b; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:.95em; font-weight:500; font-variant-numeric:tabular-nums slashed-zero; line-height:1.15; white-space:nowrap }
+[data-theme="dark"] .countdown { background:#30373d; color:#f1f1ed }
+
+/* The theme control stays at the right while the heading remains centered. */
+.app-header { display:grid; grid-template-columns:44px minmax(0,1fr) 44px; align-items:center }
+.app-header h1 { grid-column:2; grid-row:1; margin:0 }
+.date-subheading { grid-column:1 / -1; grid-row:2 }
+.theme-toggle { grid-column:3; grid-row:1; width:44px; height:44px; display:grid; place-items:center; padding:0; border:0; border-radius:8px; background:transparent; color:#777; cursor:pointer }
+.theme-toggle svg { width:20px; height:20px }
+.theme-icon-sun { display:none }
+.theme-toggle:hover { background:#f0f0ed; color:#333 }
+.theme-toggle:focus-visible { outline:2px solid #8b7a47; outline-offset:-2px }
+
+/* UI theme is independent of the period visual's day/night state. */
+:root[data-theme="dark"] { color-scheme:dark; color:#f1f1ed; background:#121518 }
+[data-theme="dark"] .today-section, [data-theme="dark"] .chart-section { background:#1c2024; border-color:#383e42; box-shadow:0 3px 14px rgba(0,0,0,.18) }
+[data-theme="dark"] .date-subheading { color:#b3b7b8 }
+[data-theme="dark"] .theme-toggle { color:#b3b7b8 }
+[data-theme="dark"] .theme-toggle:hover { background:#30363a; color:#f1f1ed }
+[data-theme="dark"] .theme-toggle:focus-visible { outline-color:#e9bc52 }
+[data-theme="dark"] .theme-icon-moon { display:none }
+[data-theme="dark"] .theme-icon-sun { display:block }
+[data-theme="dark"] .period-fill { fill:#e9bc52; opacity:.15 }
+[data-theme="dark"] .period-curve { stroke:#e9bc52 }
+[data-theme="dark"] .period-visual.is-night .period-fill { fill:#91b1cf; opacity:.18 }
+[data-theme="dark"] .period-visual.is-night .period-curve { stroke:#91b1cf }
+[data-theme="dark"] .period-horizon { stroke:#555c60 }
+[data-theme="dark"] .period-marker { background:#ffeab0; box-shadow:0 0 0 2px rgba(28,32,36,.8),0 0 10px 4px rgba(235,185,49,.4) }
+[data-theme="dark"] .period-visual.is-night .period-marker { background:#dceaf5; box-shadow:0 0 0 2px rgba(28,32,36,.8),0 0 10px 4px rgba(145,177,207,.4) }
+[data-theme="dark"] .horizon-point { border-color:#1c2024 }
+[data-theme="dark"] .horizon-start, [data-theme="dark"] .period-visual.is-night .horizon-end { background:#e9bc52 }
+[data-theme="dark"] .horizon-end, [data-theme="dark"] .period-visual.is-night .horizon-start { background:#91b1cf }
+[data-theme="dark"] .period-time, [data-theme="dark"] .period-duration::before { background:#1c2024 }
+[data-theme="dark"] .period-time span, [data-theme="dark"] .period-duration span { color:#b3b7b8 }
+[data-theme="dark"] .chart-status { color:#b3b7b8 }
+[data-theme="dark"] .grid-line { stroke:#3b4145 }
+[data-theme="dark"] .month-grid-line { stroke:#485056 }
+[data-theme="dark"] .month-tick { stroke:#7c878c }
+[data-theme="dark"] .axis-label { fill:#b3b7b8 }
+[data-theme="dark"] .daylight-band { fill:#e9bc52; opacity:.12 }
+[data-theme="dark"] .sunrise-line { stroke:#e9bc52 }
+[data-theme="dark"] .sunset-line { stroke:#91b1cf }
+[data-theme="dark"] .today-line { stroke:#d4b665 }
+[data-theme="dark"] .hover-line { stroke:#b3b7b8 }
+[data-theme="dark"] .chart-point { stroke:#1c2024 }
+[data-theme="dark"] .sunrise-point { fill:#e9bc52 }
+[data-theme="dark"] .sunset-point { fill:#91b1cf }
+[data-theme="dark"] .point-label { fill:#f1f1ed; stroke:#1c2024 }
+[data-theme="dark"] .chart-hit:focus-visible { stroke:#e9bc52 }
+[data-theme="dark"] .retry { background:#252a2e; border-color:#50585d; color:#f1f1ed }
+[data-theme="dark"] .location-section label { color:#b3b7b8 }
+[data-theme="dark"] .location-section label span { color:#e9bc52 }
+[data-theme="dark"] #location-input { background:#1c2024; border-color:#50585d; color:#f1f1ed }
+[data-theme="dark"] #location-input::placeholder { color:#b3b7b8 }
+[data-theme="dark"] #location-input:focus { border-color:#e9bc52; box-shadow:0 0 0 3px rgba(233,188,82,.18) }
+[data-theme="dark"] .location-clear { color:#b3b7b8 }
+[data-theme="dark"] .location-clear:hover { background:#30363a; color:#f1f1ed }
+[data-theme="dark"] .location-clear:focus-visible { outline-color:#e9bc52 }
+[data-theme="dark"] .location-dropdown { background:#252a2e; border-color:#50585d; box-shadow:0 8px 20px rgba(0,0,0,.3) }
+[data-theme="dark"] .location-option:hover, [data-theme="dark"] .location-option.active { background:#383e42 }
+[data-theme="dark"] .location-empty { color:#b3b7b8 }
+[data-theme="dark"] footer, [data-theme="dark"] footer a { color:#b3b7b8 }
