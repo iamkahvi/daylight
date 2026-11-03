@@ -21,6 +21,7 @@ let redrawChart;
 let chartPreview;
 let updateCurrentVisual;
 let outsidePointer;
+let chartReturn;
 
 const fullscreenLayout = window.matchMedia('(max-width:600px), (max-height:500px) and (pointer:coarse)');
 new ResizeObserver(() => redrawChart?.()).observe($('chart-wrap'));
@@ -123,6 +124,87 @@ function formatDuration(seconds) {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
+// Animate one width so the SVG and HTML overlays always share the same geometry.
+const periodVisual = document.querySelector('.period-visual');
+const periodFill = document.querySelector('.period-fill');
+const periodCurve = document.querySelector('.period-curve');
+const periodMarker = $('period-marker');
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const RETURN_DURATION = 180;
+const easeOutCubic = (progress) => 1 - (1 - progress) ** 3;
+let periodWidth = null, periodTargetWidth = null, periodFrame, periodHasEndpoints, periodIsPreview;
+let periodStart, periodEnd, periodVisualWidth, periodDurationWidth;
+
+function drawPeriodArc(width) {
+  periodWidth = width;
+  const startX = 350 - width / 2, endX = 350 + width / 2;
+  const path = `M${startX} 118 Q350 -60 ${endX} 118`;
+  periodFill.setAttribute('d', `${path} Z`);
+  periodCurve.setAttribute('d', path);
+  periodVisual.style.setProperty('--period-start-x', `${startX / 7}%`);
+  periodVisual.style.setProperty('--period-end-x', `${endX / 7}%`);
+  periodVisual.classList.toggle('is-narrow', width / 700 * periodVisualWidth < periodDurationWidth + 16);
+  if (!periodMarker.hidden) {
+    const progress = Math.max(0, Math.min(1, (Date.now() / 1000 - periodStart) / (periodEnd - periodStart)));
+    // The quadratic Bézier has a linear x coordinate and a fixed height.
+    periodMarker.style.left = `${(startX + width * progress) / 7}%`;
+    periodMarker.style.top = `${(118 - 356 * progress * (1 - progress)) / 1.5}%`;
+  }
+}
+
+function stopPeriodAnimation() {
+  if (periodFrame !== undefined) cancelAnimationFrame(periodFrame);
+  periodFrame = undefined;
+}
+
+function setPeriodWidth(width, hasEndpoints, preview) {
+  const returningFromPreview = periodIsPreview && !preview;
+  // Scrubbing follows the chart immediately; only the return to the current period animates.
+  // Loading, unavailable events and continuous polar periods are distinct states.
+  const snap = preview || periodWidth === null || periodHasEndpoints !== hasEndpoints || reducedMotion.matches ||
+    (!returningFromPreview && width !== periodTargetWidth);
+  periodHasEndpoints = hasEndpoints;
+  periodIsPreview = preview;
+  if (snap) {
+    stopPeriodAnimation();
+    periodTargetWidth = width;
+    drawPeriodArc(width);
+  } else if (width === periodTargetWidth) {
+    // Clock ticks and pointer moves within the same date must not restart the animation.
+    drawPeriodArc(periodWidth);
+  } else {
+    stopPeriodAnimation();
+    periodTargetWidth = width;
+    if (width === periodWidth) { drawPeriodArc(width); return; }
+    const from = periodWidth, started = performance.now();
+    const frame = (time) => {
+      const progress = Math.min(1, Math.max(0, (time - started) / RETURN_DURATION));
+      drawPeriodArc(from + (width - from) * easeOutCubic(progress));
+      periodFrame = progress < 1 ? requestAnimationFrame(frame) : undefined;
+    };
+    periodFrame = requestAnimationFrame(frame);
+    drawPeriodArc(periodWidth);
+  }
+}
+
+function stopChartReturn() {
+  if (!chartReturn) return;
+  cancelAnimationFrame(chartReturn.frame);
+  chartReturn.cursor.setAttribute('x1', chartReturn.target);
+  chartReturn.cursor.setAttribute('x2', chartReturn.target);
+  chartReturn.cursor.setAttribute('visibility', 'hidden');
+  chartReturn = undefined;
+}
+
+reducedMotion.addEventListener('change', () => {
+  if (!reducedMotion.matches) return;
+  if (periodFrame !== undefined) {
+    stopPeriodAnimation();
+    drawPeriodArc(periodTargetWidth);
+  }
+  stopChartReturn();
+});
+
 // The arc shows elapsed time, not the sun's actual altitude.
 function updateDaylightVisual(day, previousDay, nextDay, timeZone, preview = false) {
   const hasEvents = hasSunEvents(day);
@@ -142,8 +224,8 @@ function updateDaylightVisual(day, previousDay, nextDay, timeZone, preview = fal
   // Continuous daylight or nighttime has a duration but no event endpoints.
   const hasContinuousPeriod = Boolean(day && !hasEvents && !isPartial && (isNight || day.duration >= 86400));
   const hasArc = hasPeriod || hasContinuousPeriod;
-  const marker = $('period-marker');
-  const visual = document.querySelector('.period-visual');
+  const marker = periodMarker;
+  const visual = periodVisual;
 
   visual.classList.toggle('is-night', isNight);
   $('period-start-label').textContent = isNight ? 'sunset' : 'sunrise';
@@ -165,21 +247,18 @@ function updateDaylightVisual(day, previousDay, nextDay, timeZone, preview = fal
     const seconds = hasContinuousPeriod ? 86400 : isNight ? end - start : day.duration;
     const maxMinutes = 18 * 60;
     const width = 440 * Math.min(maxMinutes, Math.max(0, Math.round(seconds / 60))) / maxMinutes;
-    const startX = 350 - width / 2, endX = 350 + width / 2;
-    const path = `M${startX} 118 Q350 -60 ${endX} 118`;
-    document.querySelector('.period-fill').setAttribute('d', `${path} Z`);
-    document.querySelector('.period-curve').setAttribute('d', path);
-    visual.style.setProperty('--period-start-x', `${startX / 7}%`);
-    visual.style.setProperty('--period-end-x', `${endX / 7}%`);
-    // Keep the duration from covering the endpoints on very short arcs.
-    visual.classList.toggle('is-narrow', width / 700 * visual.clientWidth < document.querySelector('.period-duration').offsetWidth + 16);
-    if (!marker.hidden) {
-      const progress = (now - start) / (end - start);
-      // The quadratic Bézier has a linear x coordinate and a fixed height.
-      marker.style.left = `${(startX + width * progress) / 7}%`;
-      marker.style.top = `${(118 - 356 * progress * (1 - progress)) / 1.5}%`;
-    }
-  } else visual.classList.remove('is-narrow');
+    periodStart = start;
+    periodEnd = end;
+    // Measure once per update, rather than forcing layout on every animation frame.
+    periodVisualWidth = visual.clientWidth;
+    periodDurationWidth = document.querySelector('.period-duration').offsetWidth;
+    setPeriodWidth(width, hasPeriod, preview);
+  } else {
+    stopPeriodAnimation();
+    periodWidth = periodTargetWidth = null;
+    periodHasEndpoints = periodIsPreview = undefined;
+    visual.classList.remove('is-narrow');
+  }
 }
 
 function formatDurationDifference(seconds, todaySeconds) {
@@ -199,6 +278,7 @@ function svgElement(tag, attributes, text) {
 }
 
 function renderChart(days, today, timeZone, selection) {
+  stopChartReturn();
   chart.replaceChildren();
   const width = 700, left = 65, right = 12;
   const bounds = $('chart-wrap').getBoundingClientRect();
@@ -286,6 +366,7 @@ function renderChart(days, today, timeZone, selection) {
   let selectionSource = selection?.source;
   let restoringFocus = false;
   function selectDay(index) {
+    stopChartReturn();
     selectedIndex = Math.max(0, Math.min(days.length - 1, index));
     const day = days[selectedIndex];
     chartPreview = exploring ? day : null;
@@ -335,7 +416,30 @@ function renderChart(days, today, timeZone, selection) {
       durationLabel.setAttribute('x', Math.max(left + halfWidth, Math.min(width - right - halfWidth, x)));
     }
   }
-  resetChartSelection = () => { exploring = false; selectionSource = undefined; selectDay(todayIndex); };
+  resetChartSelection = () => {
+    if (!exploring) return;
+    const from = xFor(selectedIndex);
+    exploring = false;
+    selectionSource = undefined;
+    selectDay(todayIndex);
+    if (from === todayX || reducedMotion.matches) return;
+    cursor.setAttribute('x1', from);
+    cursor.setAttribute('x2', from);
+    cursor.setAttribute('visibility', 'visible');
+    const started = performance.now();
+    const frame = (time) => {
+      const progress = Math.min(1, Math.max(0, (time - started) / RETURN_DURATION));
+      const x = from + (todayX - from) * easeOutCubic(progress);
+      cursor.setAttribute('x1', x);
+      cursor.setAttribute('x2', x);
+      if (progress < 1) chartReturn.frame = requestAnimationFrame(frame);
+      else {
+        cursor.setAttribute('visibility', 'hidden');
+        chartReturn = undefined;
+      }
+    };
+    chartReturn = { cursor, target: todayX, frame: requestAnimationFrame(frame) };
+  };
   selectDay(selectedIndex);
   function selectPointerDay(event) {
     exploring = true;
@@ -377,6 +481,7 @@ function renderChart(days, today, timeZone, selection) {
 }
 
 async function load() {
+  stopChartReturn();
   resetChartSelection = undefined;
   redrawChart = undefined;
   chartPreview = null;
