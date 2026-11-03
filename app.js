@@ -90,7 +90,14 @@ function hasSunEvents(day) {
 function updateHeading(today, tomorrow) {
   const heading = $('today-heading');
   const now = Date.now();
-  if (!hasSunEvents(today)) {
+  // Near the polar circles, only one event may occur, or sunset may precede
+  // sunrise within a local calendar day. Use the actual event order there.
+  if (today.duration === null || tomorrow.duration === null || (hasSunEvents(today) && today.sunrise > today.sunset)) {
+    const events = [today, tomorrow].flatMap((day) => hasSunEvents(day) || day.duration === null
+      ? ['sunrise', 'sunset'].filter((type) => Number.isFinite(day[type]) && day[type] * 1000 > now).map((type) => ({ type, time: day[type] })) : []);
+    events.sort((a, b) => a.time - b.time);
+    heading.textContent = events.length ? `${events[0].type} is in ${formatCountdown(events[0].time * 1000 - now)}` : 'next sunrise or sunset unavailable';
+  } else if (!hasSunEvents(today)) {
     heading.textContent = today.duration <= 0 ? 'the sun won’t rise today' : 'the sun won’t set today';
   } else if (now < today.sunrise * 1000) {
     heading.textContent = `sunrise is in ${formatCountdown(today.sunrise * 1000 - now)}`;
@@ -112,11 +119,12 @@ function formatDuration(seconds) {
 // The arc shows elapsed time, not the sun's actual altitude.
 function updateDaylightVisual(day, previousDay, nextDay, timeZone, preview = false) {
   const hasEvents = hasSunEvents(day);
+  const isPartial = day?.duration === null;
   const hasDay = hasEvents && day.sunrise < day.sunset;
   const now = Date.now() / 1000;
   const isDaylight = hasDay && now >= day.sunrise && now < day.sunset;
   const isBeforeSunrise = hasDay && now < day.sunrise;
-  const isNight = !preview && Boolean((hasDay && !isDaylight) || (day && !hasEvents && day.duration <= 0));
+  const isNight = !preview && Boolean((hasDay && !isDaylight) || (day && !hasEvents && !isPartial && day.duration <= 0));
   // Before sunrise, use the night currently ending; after sunset, use tonight.
   const nightStart = isBeforeSunrise ? previousDay?.sunset : day?.sunset;
   const nightEnd = isBeforeSunrise ? day?.sunrise : nextDay?.sunrise;
@@ -125,7 +133,7 @@ function updateDaylightVisual(day, previousDay, nextDay, timeZone, preview = fal
   const end = isNight ? nightEnd : day?.sunset;
   const hasPeriod = isNight ? hasNight : hasDay;
   // Continuous daylight or nighttime has a duration but no event endpoints.
-  const hasContinuousPeriod = Boolean(day && !hasEvents && (isNight || day.duration >= 86400));
+  const hasContinuousPeriod = Boolean(day && !hasEvents && !isPartial && (isNight || day.duration >= 86400));
   const hasArc = hasPeriod || hasContinuousPeriod;
   const marker = $('period-marker');
   const visual = document.querySelector('.period-visual');
@@ -133,12 +141,12 @@ function updateDaylightVisual(day, previousDay, nextDay, timeZone, preview = fal
   visual.classList.toggle('is-night', isNight);
   $('period-start-label').textContent = isNight ? 'sunset' : 'sunrise';
   $('period-end-label').textContent = isNight ? 'sunrise' : 'sunset';
-  $('period-start-time').textContent = !day ? '—' : !hasEvents ? (isNight ? 'No sunset' : 'No sunrise') : formatTime(start, timeZone);
-  $('period-end-time').textContent = !day ? '—' : !hasEvents ? (isNight ? 'No sunrise' : 'No sunset') : formatTime(end, timeZone);
+  $('period-start-time').textContent = !day ? '—' : isPartial ? (Number.isFinite(day.sunrise) ? formatTime(day.sunrise, timeZone) : 'No sunrise') : !hasEvents ? (isNight ? 'No sunset' : 'No sunrise') : formatTime(start, timeZone);
+  $('period-end-time').textContent = !day ? '—' : isPartial ? (Number.isFinite(day.sunset) ? formatTime(day.sunset, timeZone) : 'No sunset') : !hasEvents ? (isNight ? 'No sunrise' : 'No sunset') : formatTime(end, timeZone);
   $('period-label').textContent = isNight ? 'nighttime' : 'daylight';
-  $('duration').textContent = !day ? '—' : !hasEvents ? formatDuration(preview ? day.duration : 86400)
+  $('duration').textContent = !day || isPartial ? '—' : !hasEvents ? formatDuration(preview ? day.duration : 86400)
     : isNight ? (hasNight ? formatDuration(end - start) : '—') : formatDuration(day.duration);
-  const state = !day ? '' : !hasEvents ? (day.duration <= 0 ? 'polar night' : 'midnight sun')
+  const state = !day ? '' : isPartial ? 'one event today' : !hasEvents ? (day.duration <= 0 ? 'polar night' : 'midnight sun')
     : !hasDay ? 'events cross midnight' : isNight && !hasNight ? 'unavailable' : '';
   $('period-state').textContent = [day && formatDate(day.date, { month: 'short', day: 'numeric' }), state].filter(Boolean).join(' · ');
   $('period-detail').textContent = isNight && hasNight ? `From sunset at ${formatTime(start, timeZone)} to ${isBeforeSunrise ? 'today’s' : 'tomorrow’s'} sunrise at ${formatTime(end, timeZone)}.` : '';
@@ -198,8 +206,8 @@ function renderChart(days, today, timeZone, selection) {
     const parts = Object.fromEntries(localTime.formatToParts(timestamp * 1000).map(({ type, value }) => [type, value]));
     return Number(parts.hour) + Number(parts.minute) / 60 + Number(parts.second) / 3600;
   };
-  const points = days.map((day, index) => hasSunEvents(day)
-    ? { x: xFor(index), sunrise: localHours(day.sunrise), sunset: localHours(day.sunset) }
+  const points = days.map((day, index) => hasSunEvents(day) || day.duration === null
+    ? { x: xFor(index), sunrise: Number.isFinite(day.sunrise) ? localHours(day.sunrise) : null, sunset: Number.isFinite(day.sunset) ? localHours(day.sunset) : null }
     : null);
   const todayIndex = days.findIndex((day) => day.date === today);
   chart.setAttribute('viewBox', `0 0 ${width} ${height}`);
@@ -228,11 +236,11 @@ function renderChart(days, today, timeZone, selection) {
     const segments = [];
     let segment = [];
     points.forEach((point) => {
-      if (!point || (segment.length && Math.abs(point[key] - segment[segment.length - 1][key]) > 12)) {
+      if (!point || point[key] === null || (segment.length && Math.abs(point[key] - segment[segment.length - 1][key]) > 12)) {
         if (segment.length) segments.push(segment);
         segment = [];
       }
-      if (point) segment.push(point);
+      if (point && point[key] !== null) segment.push(point);
     });
     if (segment.length) segments.push(segment);
     return segments;
@@ -248,8 +256,9 @@ function renderChart(days, today, timeZone, selection) {
     band = [];
   };
   points.forEach((point) => {
-    if (!point || point.sunrise > point.sunset || (band.length && (Math.abs(point.sunrise - band[band.length - 1].sunrise) > 12 || Math.abs(point.sunset - band[band.length - 1].sunset) > 12))) drawBand();
-    if (point && point.sunrise <= point.sunset) band.push(point);
+    const complete = point && point.sunrise !== null && point.sunset !== null;
+    if (!complete || point.sunrise > point.sunset || (band.length && (Math.abs(point.sunrise - band[band.length - 1].sunrise) > 12 || Math.abs(point.sunset - band[band.length - 1].sunset) > 12))) drawBand();
+    if (complete && point.sunrise <= point.sunset) band.push(point);
   });
   drawBand();
   for (const key of ['sunrise', 'sunset']) {
@@ -278,9 +287,11 @@ function renderChart(days, today, timeZone, selection) {
     const dayOfMonth = Number(day.date.slice(-2));
     const suffix = dayOfMonth >= 11 && dayOfMonth <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[dayOfMonth % 10] || 'th');
     const label = `${formatDate(day.date, { month: 'long', day: 'numeric' })}${suffix}`;
-    const times = hasSunEvents(day) ? `sunrise ${formatTime(day.sunrise, timeZone)}, sunset ${formatTime(day.sunset, timeZone)}` : (day.duration <= 0 ? 'no sunrise or sunset' : 'midnight sun');
+    const times = hasSunEvents(day) || day.duration === null
+      ? `${Number.isFinite(day.sunrise) ? `sunrise ${formatTime(day.sunrise, timeZone)}` : 'no sunrise'}, ${Number.isFinite(day.sunset) ? `sunset ${formatTime(day.sunset, timeZone)}` : 'no sunset'}`
+      : (day.duration <= 0 ? 'no sunrise or sunset' : 'midnight sun');
     const duration = formatDuration(day.duration);
-    const difference = exploring ? formatDurationDifference(day.duration, days[todayIndex].duration) : '';
+    const difference = exploring && Number.isFinite(day.duration) && Number.isFinite(days[todayIndex].duration) ? formatDurationDifference(day.duration, days[todayIndex].duration) : '';
     $('chart-detail').textContent = label;
     hitArea.setAttribute('aria-valuenow', selectedIndex + 1);
     hitArea.setAttribute('aria-valuetext', `${label}: ${times}, ${duration} daylight${difference ? `, ${difference} compared with today` : ''}`);
@@ -296,16 +307,18 @@ function renderChart(days, today, timeZone, selection) {
     const labelX = Math.max(left + 45, Math.min(width - right - 45, x));
     if (point) {
       for (const key of ['sunrise', 'sunset']) {
+        if (point[key] === null) continue;
         const y = yFor(point[key]);
         const above = key === 'sunrise' ? y - top >= 28 : top + plotHeight - y < 28;
         marker.append(svgElement('circle', { cx: x, cy: y, r: 4, class: `chart-point ${key}-point` }));
         marker.append(svgElement('text', { x: labelX, y: y + (above ? -8 : 8), 'text-anchor': 'middle', 'dominant-baseline': above ? 'auto' : 'hanging', class: 'point-label' }, formatTime(day[key], timeZone)));
       }
     }
-    const durationY = point && point.sunrise <= point.sunset
+    const completePoint = point && point.sunrise !== null && point.sunset !== null;
+    const durationY = completePoint && point.sunrise <= point.sunset
       ? (yFor(point.sunrise) + yFor(point.sunset)) / 2
       : top + plotHeight / 2;
-    const narrowBand = point && Math.abs(yFor(point.sunrise) - yFor(point.sunset)) < 28;
+    const narrowBand = completePoint && Math.abs(yFor(point.sunrise) - yFor(point.sunset)) < 28;
     const durationAnchor = narrowBand ? (x > left + plotWidth / 2 ? 'end' : 'start') : 'middle';
     const durationX = narrowBand ? x + (durationAnchor === 'end' ? -10 : 10) : labelX;
     const durationLabel = svgElement('text', { x: durationX, y: durationY, 'text-anchor': durationAnchor, 'dominant-baseline': 'middle', class: 'point-label daylight-label' }, `${duration}${difference ? ` (${difference})` : ''}`);
@@ -383,9 +396,9 @@ async function load() {
   $('chart-wrap').setAttribute('aria-busy', 'true');
   $('retry').hidden = true;
   // Providers share the same normalized day contract. Add or reorder adapters here.
-  const { openMeteo, weatherApi, localSolar, getDaysWithFallback } = DaylightProviders;
+  const { openMeteo, sunriseSunset, localSolar, getDaysWithFallback } = DaylightProviders;
   let currentDay, annualDays;
-  const forecast = getDaysWithFallback([openMeteo, weatherApi(window.DAYLIGHT_CONFIG?.weatherApiKey), localSolar], addDays(today, -1), addDays(today, 1), selected, loadController.signal, 'forecast')
+  const forecast = getDaysWithFallback([openMeteo, sunriseSunset, localSolar], addDays(today, -1), addDays(today, 1), selected, loadController.signal, 'forecast')
     .then(({ days }) => {
       if (version !== loadVersion) return;
       const [previousDay, todayData, nextDay] = days;
@@ -409,7 +422,7 @@ async function load() {
       $('retry').hidden = false;
       scheduleClock(today, null, null, selected.tz);
     });
-  const annual = getDaysWithFallback([openMeteo, localSolar], start, end, selected, loadController.signal, 'annual')
+  const annual = getDaysWithFallback([openMeteo, sunriseSunset, localSolar], start, end, selected, loadController.signal, 'annual')
     .then(({ days }) => {
       if (version !== loadVersion) return;
       annualDays = days;

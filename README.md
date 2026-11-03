@@ -18,18 +18,14 @@ Search for a city to select a location. The URL then includes the location param
    python3 -m http.server 8000
    ```
 
-2. Optionally copy `config.example.js` to `config.js` and set `weatherApiKey` to a [WeatherAPI.com](https://www.weatherapi.com/) API key. `config.js` is gitignored. Without a key, the app skips WeatherAPI and uses local solar calculations if Open-Meteo fails.
-
-3. Open <http://localhost:8000> in a browser.
-
-This is a static app: the WeatherAPI key in `config.js` is visible to every visitor. Deploy that file with the site to enable the WeatherAPI fallback; use a server-side proxy if the key must remain secret.
+2. Open <http://localhost:8000> in a browser. No API key is required.
 
 ## Data
 
-Open-Meteo supplies yesterday, today and tomorrow from its forecast API and the current year from its climate API. If the forecast fails, the app tries WeatherAPI.com’s astronomy API, then local [SunCalc](https://github.com/mourner/suncalc) calculations. If the climate API fails, SunCalc calculates the year locally, avoiding one WeatherAPI request per day. City search still uses Open-Meteo geocoding.
+Open-Meteo supplies yesterday, today and tomorrow from its forecast API and the current year from its climate API. If either request fails, the app tries [Sunrise-Sunset.org](https://sunrise-sunset.org/api), then local [SunCalc](https://github.com/mourner/suncalc) calculations. City search still uses Open-Meteo geocoding.
 
 The sunrise and sunset times are astronomical. Clouds do not change these times. Providers use different locations and algorithms, so times can differ slightly. The chart uses the same data as the card for today. Gaps show days without sunrise or sunset.
 
-Provider adapters live in `providers.js`. To add a provider, implement `getDays(start, end, location, signal, kind)` returning one `{ date, sunrise, sunset, duration }` per local date, with event timestamps and duration in seconds; return null events and a duration of 0 or 86400 for polar night or day. Add the adapter to the appropriate ordered fallback list in `load()` in `app.js`. Failed, timed-out or incomplete responses move to the next provider; changing location cancels outstanding requests.
+Provider adapters live in `providers.js`. To add a provider, implement `getDays(start, end, location, signal, kind)` returning one `{ date, sunrise, sunset, duration }` per local date, with event timestamps and duration in seconds. Return null events and a duration of 0 or 86400 for polar night or day; if only one event occurs, return null for the other event and duration. Add the adapter to the appropriate ordered fallback list in `load()` in `app.js`. Failed, timed-out or incomplete responses move to the next provider; changing location cancels outstanding requests.
 
 Run the tests with `node --test test/*.test.js`.

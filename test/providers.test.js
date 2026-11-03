@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { openMeteo, weatherApi, localSolar, getDaysWithFallback, zonedTime } = require('../providers.js');
+const { openMeteo, sunriseSunset, localSolar, getDaysWithFallback, validateDays, zonedTime } = require('../providers.js');
 
 const victoria = { lat: 48.4284, lon: -123.3656, tz: 'America/Vancouver' };
 const signal = () => new AbortController().signal;
@@ -39,19 +39,36 @@ test('wall time conversion uses the date-specific DST offset', () => {
   assert.throws(() => zonedTime('2026-03-08', 2, 30, victoria.tz));
 });
 
-test('WeatherAPI normalizes local times, DST and polar responses', async (t) => {
+test('Sunrise-Sunset.org requests one date range in the selected timezone and normalizes its data', async (t) => {
   const oldFetch = global.fetch;
   t.after(() => { global.fetch = oldFetch; });
+  const fixture = [
+    { date: '2026-03-07', sunrise: 1772897400, sunset: 1772937900, day_length: 40500, sun_status: 'normal' },
+    { date: '2026-03-08', sunrise: 1772980200, sunset: 1773020700, day_length: 40500, sun_status: 'normal' },
+    { date: '2026-03-09', sunrise: null, sunset: null, day_length: 0, sun_status: 'polar_night' },
+    { date: '2026-03-10', sunrise: null, sunset: null, day_length: 86400, sun_status: 'midnight_sun' },
+    { date: '2026-03-11', sunrise: 1773223200, sunset: null, day_length: null, sun_status: 'normal' }
+  ];
+  let calls = 0;
   global.fetch = async (url) => {
-    const date = new URL(url).searchParams.get('dt');
-    const astro = date === '2026-03-09' ? { sunrise: 'Polar Night', sunset: 'Polar Night' } : { sunrise: '07:30 AM', sunset: '06:45 PM' };
-    return { ok: true, json: async () => ({ location: { tz_id: victoria.tz }, astronomy: { astro } }) };
+    calls++;
+    const parsed = new URL(url);
+    assert.equal(parsed.origin + parsed.pathname, 'https://api.sunrise-sunset.org/v2');
+    assert.equal(parsed.searchParams.get('date_start'), '2026-03-07');
+    assert.equal(parsed.searchParams.get('date_end'), '2026-03-11');
+    assert.equal(parsed.searchParams.get('tz'), victoria.tz);
+    assert.equal(parsed.searchParams.get('time_format'), 'unix');
+    return { ok: true, json: async () => ({ tzid: victoria.tz, days: fixture }) };
   };
-  const days = await weatherApi('test').getDays('2026-03-07', '2026-03-09', victoria, signal());
-  assert.equal(new Date(days[0].sunrise * 1000).toISOString(), '2026-03-07T15:30:00.000Z');
-  assert.equal(new Date(days[1].sunrise * 1000).toISOString(), '2026-03-08T14:30:00.000Z');
+  const days = await sunriseSunset.getDays('2026-03-07', '2026-03-11', victoria, signal());
+  assert.equal(calls, 1);
+  assert.equal(days[0].sunrise, fixture[0].sunrise);
   assert.equal(days[1].duration, 40500);
   assert.equal(days[2].duration, 0);
+  assert.equal(days[3].duration, 86400);
+  assert.equal(days[4].sunset, null);
+  assert.equal(days[4].duration, null);
+  assert.equal(validateDays(days, '2026-03-07', '2026-03-11'), days);
 });
 
 test('falls back on HTTP failure and incomplete data, and stops on abort', async (t) => {
@@ -66,11 +83,47 @@ test('falls back on HTTP failure and incomplete data, and stops on abort', async
   await assert.rejects(getDaysWithFallback([localSolar], '2026-11-01', '2026-11-02', victoria, controller.signal, 'forecast'), { name: 'AbortError' });
 });
 
-test('malformed WeatherAPI times and mismatched local dates are rejected', async (t) => {
+test('Sunrise-Sunset.org rejects invalid, missing and inconsistent data', async (t) => {
   const oldFetch = global.fetch;
   t.after(() => { global.fetch = oldFetch; });
-  global.fetch = async () => ({ ok: true, json: async () => ({ location: { tz_id: 'UTC' }, astronomy: { astro: { sunrise: 'not a time', sunset: '06:45 PM' } } }) });
-  await assert.rejects(weatherApi('test').getDays('2026-03-07', '2026-03-07', victoria, signal()));
-  global.fetch = async () => ({ ok: true, json: async () => ({ location: { tz_id: 'UTC' }, astronomy: { astro: { sunrise: '01:00 AM', sunset: '06:45 PM' } } }) });
-  await assert.rejects(weatherApi('test').getDays('2026-03-07', '2026-03-07', victoria, signal()));
+  const valid = { date: '2026-03-07', sunrise: 100, sunset: 200, day_length: 100, sun_status: 'normal' };
+  let data;
+  global.fetch = async () => ({ ok: true, json: async () => data });
+  for (const response of [
+    { tzid: 'UTC', days: [valid] },
+    { tzid: victoria.tz, days: [{ ...valid, sunrise: '100' }] },
+    { tzid: victoria.tz, days: [{ ...valid, sun_status: 'unknown' }] },
+    { tzid: victoria.tz, days: [{ ...valid, sun_status: 'polar_night' }] },
+    { tzid: victoria.tz, days: [{ ...valid, sunrise: null, sunset: null, day_length: null }] }
+  ]) {
+    data = response;
+    await assert.rejects(sunriseSunset.getDays('2026-03-07', '2026-03-07', victoria, signal()));
+  }
+  data = { tzid: victoria.tz, days: [] };
+  const result = await getDaysWithFallback([sunriseSunset, localSolar], '2026-03-07', '2026-03-07', victoria, signal(), 'annual');
+  assert.equal(result.provider, 'SunCalc');
+});
+
+test('Sunrise-Sunset.org handles an annual range, a leap day, and midnight-wrapping events', async (t) => {
+  const oldFetch = global.fetch;
+  t.after(() => { global.fetch = oldFetch; });
+  const days = Array.from({ length: 366 }, (_, i) => {
+    const date = new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10);
+    return { date, sunrise: 200, sunset: 100, day_length: 86300, sun_status: 'normal' };
+  });
+  global.fetch = async () => ({ ok: true, json: async () => ({ tzid: victoria.tz, days }) });
+  const result = await getDaysWithFallback([sunriseSunset], '2024-01-01', '2024-12-31', victoria, signal(), 'annual');
+  assert.equal(result.days.length, 366);
+  assert.equal(result.days[59].date, '2024-02-29');
+  assert.equal(result.days[59].sunset, 100);
+});
+
+test('Open-Meteo failure falls back to Sunrise-Sunset.org before local calculations', async (t) => {
+  const oldFetch = global.fetch;
+  t.after(() => { global.fetch = oldFetch; });
+  global.fetch = async (url) => url.includes('open-meteo.com') ? { ok: false, status: 503 } : {
+    ok: true, json: async () => ({ tzid: victoria.tz, days: [{ date: '2026-03-07', sunrise: 100, sunset: 200, day_length: 100, sun_status: 'normal' }] })
+  };
+  const result = await getDaysWithFallback([openMeteo, sunriseSunset, localSolar], '2026-03-07', '2026-03-07', victoria, signal(), 'annual');
+  assert.equal(result.provider, 'Sunrise-Sunset.org');
 });
