@@ -73,7 +73,7 @@ function formatDate(date, options) {
 
 function formatTime(timestamp, timeZone) {
   if (!Number.isFinite(timestamp)) return '—';
-  return new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(timestamp * 1000).toLowerCase();
+  return new Intl.DateTimeFormat('en-US', { timeZone, hour: '2-digit', minute: '2-digit', hour12: true }).format(timestamp * 1000).replace(/\s/g, '').toUpperCase();
 }
 
 function formatCountdown(milliseconds) {
@@ -121,7 +121,15 @@ function updateHeading(today, tomorrow) {
 function formatDuration(seconds) {
   if (!Number.isFinite(seconds)) return '—';
   const minutes = Math.round(seconds / 60);
-  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}m`;
+}
+
+function spokenDuration(value) {
+  const match = /^([+-]?)(?:(\d+)h)?(\d+)m$/.exec(value);
+  if (!match) return value;
+  const sign = match[1] === '-' ? 'minus ' : match[1] === '+' ? 'plus ' : '';
+  const hours = match[2] === undefined ? '' : `${Number(match[2])} hours `;
+  return `${sign}${hours}${Number(match[3])} minutes`;
 }
 
 // Animate one width so the SVG and HTML overlays always share the same geometry.
@@ -232,9 +240,9 @@ function updateDaylightVisual(day, previousDay, nextDay, timeZone, preview = fal
   $('period-end-label').textContent = isNight ? 'sunrise' : 'sunset';
   $('period-start-time').textContent = !day ? '—' : isPartial ? (Number.isFinite(day.sunrise) ? formatTime(day.sunrise, timeZone) : 'No sunrise') : !hasEvents ? (isNight ? 'No sunset' : 'No sunrise') : formatTime(start, timeZone);
   $('period-end-time').textContent = !day ? '—' : isPartial ? (Number.isFinite(day.sunset) ? formatTime(day.sunset, timeZone) : 'No sunset') : !hasEvents ? (isNight ? 'No sunrise' : 'No sunset') : formatTime(end, timeZone);
-  $('period-label').textContent = isNight ? 'nighttime' : 'daylight';
   $('duration').textContent = !day || isPartial ? '—' : !hasEvents ? formatDuration(preview ? day.duration : 86400)
     : isNight ? (hasNight ? formatDuration(end - start) : '—') : formatDuration(day.duration);
+  $('duration').setAttribute('aria-label', `${isNight ? 'nighttime' : 'daylight'}: ${spokenDuration($('duration').textContent)}`);
   const state = !day ? '' : isPartial ? 'one event today' : !hasEvents ? (day.duration <= 0 ? 'polar night' : 'midnight sun')
     : !hasDay ? 'events cross midnight' : isNight && !hasNight ? 'unavailable' : '';
   $('period-state').textContent = [day && formatDate(day.date, { month: 'short', day: 'numeric' }), state].filter(Boolean).join(' · ');
@@ -266,7 +274,7 @@ function formatDurationDifference(seconds, todaySeconds) {
   const minutes = Math.abs(difference);
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
-  const value = [hours && `${hours}h`, (remainder || !hours) && `${remainder}m`].filter(Boolean).join(' ');
+  const value = hours ? `${hours}h${String(remainder).padStart(2, '0')}m` : `${remainder}m`;
   return `${difference < 0 ? '-' : difference > 0 ? '+' : ''}${value}`;
 }
 
@@ -277,10 +285,28 @@ function svgElement(tag, attributes, text) {
   return element;
 }
 
+function chartTimeBadge(parent, x, y, anchor, value, className, bounds) {
+  const group = svgElement('g', { class: 'chart-time-badge' });
+  const rect = svgElement('rect', { class: 'chart-time-background' });
+  const text = svgElement('text', { x, y, 'text-anchor': anchor, 'dominant-baseline': 'central', class: className }, value);
+  group.append(rect, text);
+  parent.append(group);
+  const fontSize = parseFloat(getComputedStyle(text).fontSize) || 13;
+  const paddingX = fontSize * 0.3, paddingY = fontSize * 0.12;
+  const textWidth = value.length * fontSize * 0.6;
+  const offset = (anchor === 'middle' ? textWidth / 2 : anchor === 'end' ? textWidth : 0) + paddingX;
+  if (bounds) {
+    x = Math.max(bounds.left + offset, Math.min(bounds.right - (textWidth + paddingX * 2 - offset), x));
+    text.setAttribute('x', x);
+  }
+  const left = x - offset;
+  for (const [name, value] of Object.entries({ x: left, y: y - fontSize / 2 - paddingY, width: textWidth + paddingX * 2, height: fontSize + paddingY * 2, rx: fontSize * 0.32 })) rect.setAttribute(name, value);
+}
+
 function renderChart(days, today, timeZone, selection) {
   stopChartReturn();
   chart.replaceChildren();
-  const width = 700, left = 65, right = 12;
+  const width = 700, left = 110, right = 12;
   const bounds = $('chart-wrap').getBoundingClientRect();
   // Match the available aspect ratio without stretching text or strokes.
   const height = fullscreenLayout.matches && bounds.width && bounds.height ? width * bounds.height / bounds.width : 374;
@@ -303,11 +329,13 @@ function renderChart(days, today, timeZone, selection) {
   let compactTimeLabels = false;
   for (let hours = 0; hours <= 24; hours += 3) {
     const y = yFor(hours);
-    const label = hours === 0 || hours === 24 ? '12 am' : hours === 12 ? '12 pm' : `${hours % 12} ${hours < 12 ? 'am' : 'pm'}`;
-    const text = svgElement('text', { x: left - 8, y: y + 4, 'text-anchor': 'end', class: 'axis-label' }, label);
-    chart.append(svgElement('line', { x1: left, y1: y, x2: width - right, y2: y, class: 'grid-line' }), text);
-    if (hours === 0) compactTimeLabels = plotHeight / 8 < parseFloat(getComputedStyle(text).fontSize) * 1.2;
-    if (compactTimeLabels && hours % 6 !== 0) text.setAttribute('visibility', 'hidden');
+    chart.append(svgElement('line', { x1: left, y1: y, x2: width - right, y2: y, class: 'grid-line' }));
+    if (hours % 6 !== 0) continue;
+    const label = `${String(hours % 12 || 12).padStart(2, '0')}:00${hours < 12 || hours === 24 ? 'AM' : 'PM'}`;
+    const text = svgElement('text', { x: left - 8, y: y + 4, 'text-anchor': 'end', class: 'axis-label time-axis-label' }, label);
+    chart.append(text);
+    if (hours === 0) compactTimeLabels = plotHeight / 4 < parseFloat(getComputedStyle(text).fontSize) * 1.2;
+    if (compactTimeLabels && hours % 12 !== 0) text.setAttribute('visibility', 'hidden');
   }
   days.forEach((day, index) => {
     if (day.date.endsWith('-01')) {
@@ -372,9 +400,7 @@ function renderChart(days, today, timeZone, selection) {
     chartPreview = exploring ? day : null;
     if (chartPreview) updateDaylightVisual(day, null, null, timeZone, true);
     else updateCurrentVisual?.();
-    const dayOfMonth = Number(day.date.slice(-2));
-    const suffix = dayOfMonth >= 11 && dayOfMonth <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[dayOfMonth % 10] || 'th');
-    const label = `${formatDate(day.date, { month: 'long', day: 'numeric' })}${suffix}`;
+    const label = formatDate(day.date, { month: 'short', day: 'numeric' });
     const times = hasSunEvents(day) || day.duration === null
       ? `${Number.isFinite(day.sunrise) ? `sunrise ${formatTime(day.sunrise, timeZone)}` : 'no sunrise'}, ${Number.isFinite(day.sunset) ? `sunset ${formatTime(day.sunset, timeZone)}` : 'no sunset'}`
       : (day.duration <= 0 ? 'no sunrise or sunset' : 'midnight sun');
@@ -382,7 +408,7 @@ function renderChart(days, today, timeZone, selection) {
     const difference = exploring && Number.isFinite(day.duration) && Number.isFinite(days[todayIndex].duration) ? formatDurationDifference(day.duration, days[todayIndex].duration) : '';
     $('chart-detail').textContent = label;
     hitArea.setAttribute('aria-valuenow', selectedIndex + 1);
-    hitArea.setAttribute('aria-valuetext', `${label}: ${times}, ${duration} daylight${difference ? `, ${difference} compared with today` : ''}`);
+    hitArea.setAttribute('aria-valuetext', `${label}: ${times}, ${spokenDuration(duration)} daylight${difference ? `, ${spokenDuration(difference)} compared with today` : ''}`);
     const x = xFor(selectedIndex);
     cursor.setAttribute('x1', x);
     cursor.setAttribute('x2', x);
@@ -399,7 +425,7 @@ function renderChart(days, today, timeZone, selection) {
         const y = yFor(point[key]);
         const above = key === 'sunrise' ? y - top >= 28 : top + plotHeight - y < 28;
         marker.append(svgElement('circle', { cx: x, cy: y, r: 4, class: `chart-point ${key}-point` }));
-        marker.append(svgElement('text', { x: labelX, y: y + (above ? -8 : 8), 'text-anchor': 'middle', 'dominant-baseline': above ? 'auto' : 'hanging', class: 'point-label' }, formatTime(day[key], timeZone)));
+        chartTimeBadge(marker, labelX, y + (above ? -17 : 17), 'middle', formatTime(day[key], timeZone), 'point-label', { left, right: width - right });
       }
     }
     const completePoint = point && point.sunrise !== null && point.sunset !== null;
@@ -409,12 +435,8 @@ function renderChart(days, today, timeZone, selection) {
     const narrowBand = completePoint && Math.abs(yFor(point.sunrise) - yFor(point.sunset)) < 28;
     const durationAnchor = narrowBand ? (x > left + plotWidth / 2 ? 'end' : 'start') : 'middle';
     const durationX = narrowBand ? x + (durationAnchor === 'end' ? -10 : 10) : labelX;
-    const durationLabel = svgElement('text', { x: durationX, y: durationY, 'text-anchor': durationAnchor, 'dominant-baseline': 'middle', class: 'point-label daylight-label' }, `${duration}${difference ? ` (${difference})` : ''}`);
-    marker.append(durationLabel);
-    if (!narrowBand) {
-      const halfWidth = Math.max(45, durationLabel.getComputedTextLength() / 2 + 4);
-      durationLabel.setAttribute('x', Math.max(left + halfWidth, Math.min(width - right - halfWidth, x)));
-    }
+    const durationText = `${duration}${difference ? ` (${difference})` : ''}`;
+    chartTimeBadge(marker, durationX, durationY, durationAnchor, durationText, 'point-label daylight-label', { left, right: width - right });
   }
   resetChartSelection = () => {
     if (!exploring) return;

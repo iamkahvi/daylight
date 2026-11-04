@@ -78,7 +78,7 @@ function setup({ reduced = false } = {}) {
   const ids = Object.fromEntries([
     'location-input', 'location-clear', 'location-dropdown', 'chart', 'chart-wrap', 'chart-detail', 'retry',
     'period-marker', 'period-start-point', 'period-end-point', 'period-start-label', 'period-end-label',
-    'period-start-time', 'period-end-time', 'period-label', 'duration', 'period-state', 'period-detail'
+    'period-start-time', 'period-end-time', 'duration', 'period-state', 'period-detail'
   ].map((id) => [id, element({ hidden: id === 'period-marker' || id.endsWith('-point') })]));
   const visual = element({ clientWidth: 700 });
   const duration = element({ offsetWidth: 120 });
@@ -117,6 +117,9 @@ function setup({ reduced = false } = {}) {
 
   return {
     ids, visual, fill, curve, mediaQueries,
+    formatTime: (timestamp, timeZone) => context.formatTime(timestamp, timeZone),
+    formatDuration: (seconds) => context.formatDuration(seconds),
+    formatDurationDifference: (seconds, todaySeconds) => context.formatDurationDifference(seconds, todaySeconds),
     update(day, previous = null, next = null, preview = false) {
       lastUpdateTime = (epoch + time) / 1000;
       context.updateDaylightVisual(day, previous, next, 'UTC', preview);
@@ -152,6 +155,22 @@ function setup({ reduced = false } = {}) {
     }
   };
 }
+
+test('times and durations use their respective formats', () => {
+  const app = setup();
+  assert.equal(app.formatTime(Date.parse('2025-06-21T17:50:00Z') / 1000, 'UTC'), '05:50PM');
+  assert.equal(app.formatTime(Date.parse('2025-06-21T00:05:00Z') / 1000, 'UTC'), '12:05AM');
+  assert.equal(app.formatTime(Date.parse('2025-06-21T17:50:00Z') / 1000, 'America/Vancouver'), '10:50AM');
+  assert.equal(app.formatTime(null, 'UTC'), '—');
+  assert.equal(app.formatDuration(59 * 60 + 40), '1h00m');
+  assert.equal(app.formatDuration(86400), '24h00m');
+  assert.equal(app.formatDurationDifference(8 * 3600 + 300, 9 * 3600), '-55m');
+  assert.equal(app.formatDurationDifference(10 * 3600 + 55 * 60, 9 * 3600), '+1h55m');
+  assert.equal(app.formatDurationDifference(10 * 3600, 9 * 3600), '+1h00m');
+  assert.equal(app.formatDurationDifference(9 * 3600, 9 * 3600), '0m');
+  app.update(day(8), null, null, true);
+  assert.equal(app.ids.duration.getAttribute('aria-label'), 'daylight: 8 hours 0 minutes');
+});
 
 // Make a real period around the fixed clock, with a controllable elapsed fraction.
 function day(hours, progress = 0.25) {
@@ -230,7 +249,7 @@ test('entering preview and scrubbing between dates update the whole arc immediat
   for (const hours of [4, 12, 2, 18, 22, 6, 6]) {
     app.update(day(hours), null, null, true);
     near(geometry(app).width, targetWidth(hours), `preview ${hours}h snaps`);
-    assert.equal(app.ids.duration.textContent, `${hours}h 00m`);
+    assert.equal(app.ids.duration.textContent, `${hours}h00m`);
     assert.equal(app.ids['period-marker'].hidden, true);
     assert.equal(app.pending(), 0, 'preview must not queue an animation');
     assert.equal(app.requests(), requests, 'preview never requests a frame');
@@ -303,7 +322,7 @@ test('returning from preview animates to current daylight in about 180 ms', () =
     app.update(current);
     near(geometry(app).width, targetWidth(previewHours), 'return starts at the preview width');
     assert.ok(app.pending() > 0, 'return schedules a frame');
-    assert.equal(app.ids.duration.textContent, `${currentHours}h 00m`);
+    assert.equal(app.ids.duration.textContent, `${currentHours}h00m`);
     checkMarker(app, current);
     app.tick(16);
     app.tick(74);
@@ -338,7 +357,7 @@ test('returning from preview animates to the current night interval and marker',
     const app = setup();
     app.update(day(4), null, null, true);
     app.update(current, previous, next);
-    assert.equal(app.ids['period-label'].textContent, 'nighttime');
+    assert.match(app.ids.duration.getAttribute('aria-label'), /^nighttime:/);
     near(geometry(app).width, targetWidth(4), 'night return starts at preview width');
     checkMarker(app, night);
     waitForIntermediate(app, targetWidth(4), targetWidth(12));
@@ -387,7 +406,7 @@ test('a polar-night preview has no daylight arc and a later valid preview snaps'
   const app = setup();
   app.update(day(4));
   app.update({ date: '2025-12-21', sunrise: null, sunset: null, duration: 0 }, null, null, true);
-  assert.equal(app.ids.duration.textContent, '0h 00m');
+  assert.equal(app.ids.duration.textContent, '0h00m');
   assert.equal(app.ids['period-state'].textContent.includes('polar night'), true);
   assert.equal(app.curve.hidden, true);
   assert.equal(app.ids['period-marker'].hidden, true);
@@ -542,7 +561,7 @@ function lineChart(options) {
   return { app, hit, cursor };
 }
 
-const chartXs = [65, 220.75, 376.5, 532.25, 688];
+const chartXs = [110, 254.5, 399, 543.5, 688];
 function pointerAt(hit, index) {
   hit.dispatch('pointermove', { clientX: chartXs[index], pointerType: 'mouse' });
 }
@@ -561,6 +580,13 @@ function key(hit, name) {
   hit.dispatch('keydown', { key: name, preventDefault() { prevented = true; } });
   assert.ok(prevented, `${name} is handled`);
 }
+
+test('year chart uses plain six-hour axis labels and describes durations with units', () => {
+  const { app, hit } = lineChart();
+  const labels = app.ids.chart.children.filter((child) => child.getAttribute('class') === 'axis-label time-axis-label');
+  assert.deepEqual(labels.map((label) => label.textContent), ['12:00AM', '06:00AM', '12:00PM', '06:00PM', '12:00AM']);
+  assert.match(hit.getAttribute('aria-valuetext'), /^Jun 21: .*8 hours 0 minutes daylight/);
+});
 
 test('year-chart hover line follows every pointer selection immediately', () => {
   const { app, hit, cursor } = lineChart();

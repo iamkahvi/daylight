@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f9f9f9">
+  <title>daylight - style guide</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    html, body { height:auto; overflow:auto; overscroll-behavior:auto }
+    .guide { max-width:800px; margin:0 auto; padding:30px 20px }
+    .guide-header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px }
+    .guide-header h1 { margin:0 }
+    .guide-header .theme-toggle { flex:none }
+    .guide-intro { margin-bottom:20px; line-height:1.5 }
+    .guide-section { margin:12px 0; padding:20px 24px }
+    .guide-section h2 { margin-bottom:8px }
+    .guide-section p { line-height:1.5 }
+    .guide-samples { display:flex; flex-wrap:wrap; align-items:center; gap:18px 30px; margin-top:16px }
+    .guide-sample { display:flex; flex-direction:column; align-items:flex-start; gap:8px }
+    .guide-caption { color:#777; font-size:12px }
+    [data-theme="dark"] .guide-caption { color:#b3b7b8 }
+    .guide-sample .period-time, .guide-sample .period-duration { position:static; transform:none; padding:0; background:transparent }
+    .guide-sample .period-duration::before { display:none }
+    .guide-sample svg { display:block; overflow:visible }
+    .guide-link { color:inherit }
+    @media (max-width:600px) { .guide { padding:16px 14px } .guide-section { padding:16px } }
+  </style>
+</head>
+<body>
+  <main class="guide">
+    <header class="guide-header">
+      <h1>daylight style guide</h1>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode" title="Switch to dark mode">
+        <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.9 13.2A8.5 8.5 0 0 1 10.8 3.1 8.5 8.5 0 1 0 20.9 13.2Z"></path></svg>
+        <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4m0-14.2-1.4 1.4M6.3 17.7l-1.4 1.4"></path></svg>
+      </button>
+    </header>
+    <p class="guide-intro">These examples use the app styles. Use the sample IDs to refer to each style. <a class="guide-link" href="./">Return to the app</a>.</p>
+
+    <section class="today-section guide-section">
+      <h2>countdowns</h2>
+      <p>Hours, minutes, and seconds use two digits each.</p>
+      <div class="guide-samples"><div class="guide-sample" id="c1"><span class="guide-caption">C1 · countdown</span><h2>sunrise is in <span class="countdown">02:05:09</span></h2></div></div>
+    </section>
+
+    <section class="today-section guide-section">
+      <h2>times</h2>
+      <p>Times use a 12-hour clock, two-digit hours, and uppercase AM or PM.</p>
+      <div class="guide-samples">
+        <div class="guide-sample" id="t1"><span class="guide-caption">T1 · arc time</span><div class="period-time"><strong class="time-value">05:50PM</strong></div></div>
+        <div class="guide-sample" id="t2"><span class="guide-caption">T2 · chart time</span><svg width="120" height="40" viewBox="0 0 120 40" role="img" aria-label="5:50 PM"><g class="chart-time-badge guide-badge"><rect class="chart-time-background"></rect><text x="60" y="20" text-anchor="middle" dominant-baseline="central" class="point-label">05:50PM</text></g></svg></div>
+      </div>
+    </section>
+
+    <section class="today-section guide-section">
+      <h2>durations</h2>
+      <p>Durations use hours and minutes. The chart also shows a difference for a selected date.</p>
+      <div class="guide-samples">
+        <div class="guide-sample" id="d1"><span class="guide-caption">D1 · arc duration</span><div class="period-duration"><strong class="time-value">10h34m</strong></div></div>
+        <div class="guide-sample" id="d2"><span class="guide-caption">D2 · chart duration</span><svg width="220" height="40" viewBox="0 0 220 40" role="img" aria-label="10 hours 34 minutes, plus 55 minutes"><g class="chart-time-badge guide-badge"><rect class="chart-time-background"></rect><text x="110" y="20" text-anchor="middle" dominant-baseline="central" class="point-label daylight-label">10h34m (+55m)</text></g></svg><svg width="220" height="40" viewBox="0 0 220 40" role="img" aria-label="10 hours 34 minutes, plus 1 hour 55 minutes"><g class="chart-time-badge guide-badge"><rect class="chart-time-background"></rect><text x="110" y="20" text-anchor="middle" dominant-baseline="central" class="point-label daylight-label">10h34m (+1h55m)</text></g></svg></div>
+      </div>
+    </section>
+
+    <section class="today-section guide-section">
+      <h2>time axis labels</h2>
+      <p>The year chart uses plain labels at six-hour intervals.</p>
+      <div class="guide-samples"><div class="guide-sample" id="a1" style="width:100%"><span class="guide-caption">A1 · time axis</span><svg width="100%" style="max-width:520px" viewBox="0 0 520 50" role="img" aria-label="12 AM, 6 AM, 12 PM, 6 PM"><text x="0" y="30" class="axis-label time-axis-label">12:00AM</text><text x="130" y="30" class="axis-label time-axis-label">06:00AM</text><text x="260" y="30" class="axis-label time-axis-label">12:00PM</text><text x="390" y="30" class="axis-label time-axis-label">06:00PM</text></svg></div></div>
+    </section>
+
+    <section class="today-section guide-section">
+      <h2>date axis labels</h2>
+      <p>Month labels use lowercase abbreviations. The selected date includes the day.</p>
+      <div class="guide-samples">
+        <div class="guide-sample" id="a2"><span class="guide-caption">A2 · month axis</span><svg width="130" height="40" viewBox="0 0 130 40" role="img" aria-label="January, February, March"><text x="0" y="25" class="axis-label">jan</text><text x="45" y="25" class="axis-label">feb</text><text x="90" y="25" class="axis-label">mar</text></svg></div>
+        <div class="guide-sample" id="a3"><span class="guide-caption">A3 · selected date</span><svg width="90" height="40" viewBox="0 0 90 40" role="img" aria-label="November 3"><text x="0" y="25" class="point-label chart-date">Nov 3</text></svg></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    function sizeBadges() {
+      document.querySelectorAll('.guide-badge').forEach((group) => {
+        const text = group.querySelector('text');
+        const rect = group.querySelector('rect');
+        const fontSize = parseFloat(getComputedStyle(text).fontSize);
+        const paddingX = fontSize * 0.3, paddingY = fontSize * 0.12;
+        const width = text.textContent.length * fontSize * 0.6;
+        const x = Number(text.getAttribute('x')), y = Number(text.getAttribute('y'));
+        for (const [name, value] of Object.entries({ x: x - width / 2 - paddingX, y: y - fontSize / 2 - paddingY, width: width + paddingX * 2, height: fontSize + paddingY * 2, rx: fontSize * 0.32 })) rect.setAttribute(name, value);
+      });
+    }
+    sizeBadges();
+    window.addEventListener('resize', sizeBadges);
+  </script>
+</body>
+</html>
