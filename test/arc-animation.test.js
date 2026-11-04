@@ -561,7 +561,7 @@ function lineChart(options) {
   return { app, hit, cursor };
 }
 
-const chartXs = [110, 254.5, 399, 543.5, 688];
+const chartXs = [12, 181, 350, 519, 688];
 function pointerAt(hit, index) {
   hit.dispatch('pointermove', { clientX: chartXs[index], pointerType: 'mouse' });
 }
@@ -581,10 +581,12 @@ function key(hit, name) {
   assert.ok(prevented, `${name} is handled`);
 }
 
-test('year chart uses plain six-hour axis labels and describes durations with units', () => {
+test('year chart keeps grid lines without time axis labels', () => {
   const { app, hit } = lineChart();
   const labels = app.ids.chart.children.filter((child) => child.getAttribute('class') === 'axis-label time-axis-label');
-  assert.deepEqual(labels.map((label) => label.textContent), ['12:00AM', '06:00AM', '12:00PM', '06:00PM', '12:00AM']);
+  const lines = app.ids.chart.children.filter((child) => child.getAttribute('class') === 'grid-line');
+  assert.equal(labels.length, 0);
+  assert.equal(lines.length, 9);
   assert.match(hit.getAttribute('aria-valuetext'), /^Jun 21: .*8 hours 0 minutes daylight/);
 });
 

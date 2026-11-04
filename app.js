@@ -306,7 +306,7 @@ function chartTimeBadge(parent, x, y, anchor, value, className, bounds) {
 function renderChart(days, today, timeZone, selection) {
   stopChartReturn();
   chart.replaceChildren();
-  const width = 700, left = 110, right = 12;
+  const width = 700, left = 12, right = 12;
   const bounds = $('chart-wrap').getBoundingClientRect();
   // Match the available aspect ratio without stretching text or strokes.
   const height = fullscreenLayout.matches && bounds.width && bounds.height ? width * bounds.height / bounds.width : 374;
@@ -326,16 +326,9 @@ function renderChart(days, today, timeZone, selection) {
   chart.setAttribute('viewBox', `0 0 ${width} ${height}`);
   chart.setAttribute('role', 'group');
 
-  let compactTimeLabels = false;
   for (let hours = 0; hours <= 24; hours += 3) {
     const y = yFor(hours);
     chart.append(svgElement('line', { x1: left, y1: y, x2: width - right, y2: y, class: 'grid-line' }));
-    if (hours % 6 !== 0) continue;
-    const label = `${String(hours % 12 || 12).padStart(2, '0')}:00${hours < 12 || hours === 24 ? 'AM' : 'PM'}`;
-    const text = svgElement('text', { x: left - 8, y: y + 4, 'text-anchor': 'end', class: 'axis-label time-axis-label' }, label);
-    chart.append(text);
-    if (hours === 0) compactTimeLabels = plotHeight / 4 < parseFloat(getComputedStyle(text).fontSize) * 1.2;
-    if (compactTimeLabels && hours % 12 !== 0) text.setAttribute('visibility', 'hidden');
   }
   const monthLabels = [];
   days.forEach((day, index) => {
