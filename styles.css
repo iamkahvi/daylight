@@ -7,6 +7,9 @@
 .app-header h1 { margin:0 0 3px }
 .date-subheading { color:#888; font-size:13px; line-height:1.35; text-transform:lowercase }
 .chart-date, #period-state { text-transform:lowercase }
+.month-axis-label { transition:opacity 180ms ease }
+.month-axis-label.is-obscured { opacity:0 }
+@media (prefers-reduced-motion:reduce) { .month-axis-label { transition:none } }
 
 @media (max-width:600px), (max-height:500px) and (pointer:coarse) {
   html, body { height:100%; overflow:hidden; overscroll-behavior:none }

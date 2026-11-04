@@ -588,6 +588,24 @@ test('year chart uses plain six-hour axis labels and describes durations with un
   assert.match(hit.getAttribute('aria-valuetext'), /^Jun 21: .*8 hours 0 minutes daylight/);
 });
 
+test('selected date shares the month axis without overlapping month labels', () => {
+  const app = setup();
+  const days = ['01', '02', '03', '04', '05'].map((month) => ({ ...day(8), date: `2025-${month}-01` }));
+  const hit = app.renderChart(days, days[2]);
+  const months = app.ids.chart.children.filter((child) => child.getAttribute('class') === 'axis-label month-axis-label');
+  const marker = app.ids.chart.children.find((child) => child.getAttribute('aria-hidden') === 'true' && child.children.length > 0);
+  const selectedDate = () => marker.children.find((child) => child.getAttribute('class') === 'point-label chart-date');
+  assert.equal(selectedDate().textContent, 'Mar 1');
+  assert.equal(selectedDate().getAttribute('y'), months[2].getAttribute('y'));
+  assert.equal(months[2].classList.contains('is-obscured'), true);
+  assert.equal(months[2].getAttribute('aria-hidden'), 'true');
+  pointerAt(hit, 0);
+  assert.equal(selectedDate().textContent, 'Jan 1');
+  assert.equal(months[0].classList.contains('is-obscured'), true);
+  assert.equal(months[2].classList.contains('is-obscured'), false);
+  assert.equal(months[2].getAttribute('aria-hidden'), null);
+});
+
 test('year-chart hover line follows every pointer selection immediately', () => {
   const { app, hit, cursor } = lineChart();
   assertLine(cursor, chartXs[2], 'hidden');

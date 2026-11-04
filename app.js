@@ -337,12 +337,15 @@ function renderChart(days, today, timeZone, selection) {
     if (hours === 0) compactTimeLabels = plotHeight / 4 < parseFloat(getComputedStyle(text).fontSize) * 1.2;
     if (compactTimeLabels && hours % 12 !== 0) text.setAttribute('visibility', 'hidden');
   }
+  const monthLabels = [];
   days.forEach((day, index) => {
     if (day.date.endsWith('-01')) {
       const x = xFor(index);
       chart.append(svgElement('line', { x1: x, y1: top, x2: x, y2: top + plotHeight, class: 'month-grid-line' }));
       chart.append(svgElement('line', { x1: x, y1: top + plotHeight, x2: x, y2: top + plotHeight + 5, class: 'month-tick' }));
-      chart.append(svgElement('text', { x, y: height - 8, 'text-anchor': index === 0 ? 'start' : 'middle', class: 'axis-label' }, formatDate(day.date, { month: 'short' }).toLowerCase()));
+      const text = svgElement('text', { x, y: height - 8, 'text-anchor': index === 0 ? 'start' : 'middle', class: 'axis-label month-axis-label' }, formatDate(day.date, { month: 'short' }).toLowerCase());
+      chart.append(text);
+      monthLabels.push(text);
     }
   });
 
@@ -416,7 +419,25 @@ function renderChart(days, today, timeZone, selection) {
 
     marker.replaceChildren();
     const dateAnchor = x < left + 90 ? 'start' : x > width - right - 90 ? 'end' : 'middle';
-    marker.append(svgElement('text', { x, y: top - 8, 'text-anchor': dateAnchor, class: 'point-label chart-date' }, label));
+    const dateLabel = svgElement('text', { x, y: height - 8, 'text-anchor': dateAnchor, class: 'point-label chart-date' }, label);
+    marker.append(dateLabel);
+    // Hide month labels that would overlap the selected date.
+    function labelBounds(text) {
+      const fontSize = parseFloat(getComputedStyle(text).fontSize) || 13;
+      const textWidth = text.textContent.length * fontSize * 0.65;
+      const anchor = text.getAttribute('text-anchor');
+      const position = Number(text.getAttribute('x'));
+      const start = position - (anchor === 'end' ? textWidth : anchor === 'middle' ? textWidth / 2 : 0);
+      return { start, end: start + textWidth };
+    }
+    const dateBounds = labelBounds(dateLabel);
+    for (const monthLabel of monthLabels) {
+      const monthBounds = labelBounds(monthLabel);
+      const obscured = monthBounds.end + 4 >= dateBounds.start && monthBounds.start - 4 <= dateBounds.end;
+      monthLabel.classList.toggle('is-obscured', obscured);
+      if (obscured) monthLabel.setAttribute('aria-hidden', 'true');
+      else monthLabel.removeAttribute('aria-hidden');
+    }
     const point = points[selectedIndex];
     const labelX = Math.max(left + 45, Math.min(width - right - 45, x));
     if (point) {
