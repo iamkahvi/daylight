@@ -497,7 +497,7 @@ async function load() {
   $('current-date').dateTime = today;
   $('current-date').textContent = formatDate(today, { weekday: 'long', month: 'long', day: 'numeric' });
   $('location-name').textContent = selected.name;
-  document.title = `daylight hours - ${selected.name.toLowerCase()}`;
+  document.title = `daylight - ${selected.name.toLowerCase()}`;
   $('today-heading').textContent = 'loading daylight times…';
   updateCurrentVisual = () => updateDaylightVisual(null, null, null, selected.tz);
   updateCurrentVisual();
