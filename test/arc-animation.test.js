@@ -587,6 +587,7 @@ test('year chart keeps grid lines without time axis labels', () => {
   const lines = app.ids.chart.children.filter((child) => child.getAttribute('class') === 'grid-line');
   assert.equal(labels.length, 0);
   assert.equal(lines.length, 9);
+  assert.equal(Number(lines[0].getAttribute('y1')), 24);
   assert.match(hit.getAttribute('aria-valuetext'), /^Jun 21: .*8 hours 0 minutes daylight/);
 });
 

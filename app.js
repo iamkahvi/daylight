@@ -310,7 +310,7 @@ function renderChart(days, today, timeZone, selection) {
   const bounds = $('chart-wrap').getBoundingClientRect();
   // Match the available aspect ratio without stretching text or strokes.
   const height = fullscreenLayout.matches && bounds.width && bounds.height ? width * bounds.height / bounds.width : 374;
-  const top = Math.min(38, height / 4), bottom = Math.min(34, height / 4);
+  const top = Math.min(24, height / 4), bottom = Math.min(34, height / 4);
   const plotWidth = width - left - right, plotHeight = height - top - bottom;
   const xFor = (index) => left + (index / (days.length - 1)) * plotWidth;
   const yFor = (hours) => top + (hours / 24) * plotHeight;
