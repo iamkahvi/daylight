@@ -46,13 +46,14 @@ function element({ hidden = false, clientWidth = 0, offsetWidth = 0 } = {}) {
     append(...children) { this.children.push(...children); },
     replaceChildren(...children) { this.children = children; },
     getBoundingClientRect() { return { left: 0, width: 700, height: 374 }; },
+    getBBox() { return { x: Number(this.getAttribute('x')) - 40, width: 80 }; },
     getComputedTextLength() { return 80; },
     contains() { return false; }
   };
   return el;
 }
 
-function setup({ reduced = false, touchFirst = false } = {}) {
+function setup({ reduced = false, touchFirst = false, textBounds = 'normal' } = {}) {
   let time = 0;
   let nextId = 1;
   let requests = 0;
@@ -94,7 +95,12 @@ function setup({ reduced = false, touchFirst = false } = {}) {
     getElementById(id) { assert.ok(ids[id], `unexpected element id: ${id}`); return ids[id]; },
     querySelector(selector) { assert.ok(selectors[selector], `unexpected selector: ${selector}`); return selectors[selector]; },
     querySelectorAll(selector) { assert.equal(selector, '.period-arc'); return [fill, curve]; },
-    createElementNS() { return element(); },
+    createElementNS() {
+      const el = element();
+      if (textBounds === 'zero') el.getBBox = () => ({ x: 0, width: 0 });
+      if (textBounds === 'error') el.getBBox = () => { throw new Error('SVG is not rendered'); };
+      return el;
+    },
     addEventListener() {}
   };
   const performance = { now: () => time };
@@ -109,7 +115,7 @@ function setup({ reduced = false, touchFirst = false } = {}) {
   };
   const context = vm.createContext({
     document, window, Date: ClockDate, performance, requestAnimationFrame, cancelAnimationFrame,
-    getComputedStyle() { return { fontSize: '12px' }; },
+    getComputedStyle() { return { fontSize: '12px', strokeWidth: '4px' }; },
     ResizeObserver: class { observe() {} }, URLSearchParams,
     fetch() { throw new Error('The arc test must not access the network'); }
   });
@@ -781,15 +787,62 @@ test('selected date shares the month axis without overlapping month labels', () 
   const months = app.ids.chart.children.filter((child) => child.getAttribute('class') === 'axis-label month-axis-label');
   const marker = app.ids.chart.children.find((child) => child.getAttribute('aria-hidden') === 'true' && child.children.length > 0);
   const selectedDate = () => marker.children.find((child) => child.getAttribute('class') === 'point-label chart-date');
+  const topDate = () => marker.children.find((child) => child.getAttribute('class') === 'point-label chart-date chart-date-top');
   assert.equal(selectedDate().textContent, 'Mar 1');
+  assert.equal(topDate(), undefined, 'top date is absent in the current-day view');
+  hit.dispatch('focus');
+  assert.equal(topDate().textContent, selectedDate().textContent);
+  assert.equal(topDate().getAttribute('x'), selectedDate().getAttribute('x'));
+  assert.equal(Number(topDate().getAttribute('y')), 18);
   assert.equal(selectedDate().getAttribute('y'), months[2].getAttribute('y'));
   assert.equal(months[2].classList.contains('is-obscured'), true);
   assert.equal(months[2].getAttribute('aria-hidden'), 'true');
   pointerAt(hit, 0);
   assert.equal(selectedDate().textContent, 'Jan 1');
+  assert.equal(topDate().textContent, selectedDate().textContent);
+  assert.equal(Number(topDate().getAttribute('x')), 44, 'left edge clamps the centered label');
+  assert.equal(topDate().getAttribute('text-anchor'), 'middle');
   assert.equal(months[0].classList.contains('is-obscured'), true);
   assert.equal(months[2].classList.contains('is-obscured'), false);
   assert.equal(months[2].getAttribute('aria-hidden'), null);
+  pointerAt(hit, 4);
+  assert.equal(topDate().textContent, 'May 1');
+  assert.equal(topDate().getAttribute('text-anchor'), 'middle');
+  assert.equal(Number(topDate().getAttribute('x')), 656, 'right edge clamps the centered label');
+  hit.dispatch('pointerleave', { pointerType: 'mouse' });
+  assert.equal(topDate(), undefined, 'top date disappears when exploration ends');
+  assert.equal(selectedDate().textContent, 'Mar 1', 'bottom date returns to the current day');
+});
+
+test('top date stays centered on the hover line until its text reaches the chart edge', () => {
+  const app = setup();
+  const days = Array.from({ length: 101 }, (_, index) => ({
+    ...day(8), date: new Date(Date.UTC(2025, 0, 1 + index)).toISOString().slice(0, 10)
+  }));
+  const hit = app.renderChart(days, days[50]);
+  const marker = app.ids.chart.children.find((child) => child.getAttribute('aria-hidden') === 'true' && child.children.length > 0);
+  const cursor = app.ids.chart.children.find((child) => child.getAttribute('class') === 'hover-line');
+  const topDate = () => marker.children.find((child) => child.getAttribute('class') === 'point-label chart-date chart-date-top');
+  for (const pointerX of [52, 648]) {
+    hit.dispatch('pointermove', { clientX: pointerX, pointerType: 'mouse' });
+    near(Number(topDate().getAttribute('x')), Number(cursor.getAttribute('x1')), 'label stays centered near the edge');
+  }
+  for (const [pointerX, expectedX] of [[20, 44], [680, 656]]) {
+    hit.dispatch('pointermove', { clientX: pointerX, pointerType: 'mouse' });
+    near(Number(topDate().getAttribute('x')), expectedX, 'label shifts only far enough to stay inside the chart');
+  }
+});
+
+test('top date uses a safe estimate when SVG text cannot be measured', () => {
+  for (const textBounds of ['zero', 'error']) {
+    const app = setup({ textBounds });
+    const days = ['01', '02', '03'].map((month) => ({ ...day(8), date: `2025-${month}-01` }));
+    const hit = app.renderChart(days, days[1]);
+    hit.dispatch('pointermove', { clientX: 12, pointerType: 'mouse' });
+    const marker = app.ids.chart.children.find((child) => child.getAttribute('aria-hidden') === 'true' && child.children.length > 0);
+    const topDate = marker.children.find((child) => child.getAttribute('class') === 'point-label chart-date chart-date-top');
+    near(Number(topDate.getAttribute('x')), 23.5, 'estimated width keeps the label inside the chart');
+  }
 });
 
 test('year-chart hover line follows every pointer selection immediately', () => {
@@ -823,6 +876,9 @@ test('the exploration toggle enables touch scrubbing and resets the chart when d
   const current = day(8);
   const days = [4, 6, 8, 10, 12].map((hours, index) => ({ ...day(hours), date: `2025-06-${19 + index}` }));
   let hit = app.renderChart(days, current);
+  const topDate = () => app.ids.chart.children.find((child) => child.getAttribute('aria-hidden') === 'true' && child.children.length > 0)
+    .children.find((child) => child.getAttribute('class') === 'point-label chart-date chart-date-top');
+  assert.equal(topDate(), undefined, 'top date is hidden when exploration is off');
   hit.dispatch('pointerdown', { clientX: chartXs[0], pointerType: 'touch' });
   hit.dispatch('pointermove', { clientX: chartXs[4], pointerType: 'touch' });
   hit.dispatch('focus');
@@ -833,7 +889,9 @@ test('the exploration toggle enables touch scrubbing and resets the chart when d
   assert.equal(app.ids['chart-toggle'].getAttribute('aria-pressed'), 'true');
   hit = app.chartHit();
   assert.equal(hit.getAttribute('role'), 'slider');
+  assert.equal(topDate(), undefined, 'enabling exploration alone does not show the top date');
   hit.dispatch('pointerdown', { clientX: chartXs[0], pointerType: 'touch' });
+  assert.equal(topDate().textContent, 'Jun 19', 'scrubbing shows the top date');
   near(geometry(app).width, targetWidth(4), 'touch down selects a date');
   hit.dispatch('pointermove', { clientX: chartXs[4], pointerType: 'touch' });
   near(geometry(app).width, targetWidth(12), 'touch drag selects another date');
@@ -845,6 +903,7 @@ test('the exploration toggle enables touch scrubbing and resets the chart when d
   hit = app.chartHit();
   assert.equal(app.ids['chart-toggle'].getAttribute('aria-pressed'), 'false');
   assert.equal(hit.getAttribute('aria-hidden'), 'true');
+  assert.equal(topDate(), undefined, 'disabling exploration hides the top date');
   assert.equal(app.ids.duration.textContent, '25%', 'disabling returns to the current day');
   app.finish();
   near(geometry(app).width, targetWidth(8), 'return animation finishes at the current day');

@@ -518,6 +518,21 @@ function renderChart(days, today, timeZone, selection, followingDay = null) {
     const dateAnchor = x < left + 90 ? 'start' : x > width - right - 90 ? 'end' : 'middle';
     const dateLabel = svgElement('text', { x, y: height - 8, 'text-anchor': dateAnchor, class: 'point-label chart-date' }, label);
     marker.append(dateLabel);
+    if (exploring) {
+      const topDateLabel = svgElement('text', { x, y: top - 6, 'text-anchor': 'middle', class: 'point-label chart-date chart-date-top' }, label);
+      marker.append(topDateLabel);
+      // Keep the label centered until its painted bounds reach the chart edge.
+      // Hidden SVGs can lack a measurable box during the initial render.
+      const style = getComputedStyle(topDateLabel);
+      const outline = parseFloat(style.strokeWidth) || 0;
+      let textBox;
+      try { textBox = topDateLabel.getBBox(); } catch { /* Use an estimate until the chart is visible. */ }
+      const halfWidth = label.length * (parseFloat(style.fontSize) || 13) * 0.65 / 2;
+      const textLeft = textBox?.width ? textBox.x : x - halfWidth;
+      const textRight = textBox?.width ? textBox.x + textBox.width : x + halfWidth;
+      const shift = Math.max(0, outline - textLeft) - Math.max(0, textRight + outline - width);
+      topDateLabel.setAttribute('x', x + shift);
+    }
     // Hide month labels that would overlap the selected date.
     function labelBounds(text) {
       const fontSize = parseFloat(getComputedStyle(text).fontSize) || 13;
