@@ -23,7 +23,7 @@
 <body>
   <main class="app">
     <header class="app-header">
-      <h1>daylight hours</h1>
+      <h1 id="app-title">daylight hours</h1>
       <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode" title="Switch to dark mode">
         <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.9 13.2A8.5 8.5 0 0 1 10.8 3.1 8.5 8.5 0 1 0 20.9 13.2Z"></path></svg>
         <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4m0-14.2-1.4 1.4M6.3 17.7l-1.4 1.4"></path></svg>
@@ -50,7 +50,12 @@
     </section>
 
     <section class="chart-section" aria-labelledby="chart-title">
-      <h2 id="chart-title">the year in daylight</h2>
+      <div class="chart-header">
+        <h2 id="chart-title">the year in daylight</h2>
+        <button id="chart-toggle" class="chart-toggle" type="button" aria-label="Explore chart dates" aria-pressed="false" aria-controls="chart">
+          <span class="chart-toggle-track" aria-hidden="true"></span>
+        </button>
+      </div>
       <span id="chart-detail" class="sr-only" aria-live="polite">hover or focus the chart for details</span>
       <div id="chart-wrap" class="chart-wrap" aria-busy="true">
         <div id="chart-status" class="chart-status" role="status">Loading daylight data…</div>

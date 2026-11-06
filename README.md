@@ -1,12 +1,12 @@
 # Daylight hours
 
-This web app shows sunrise, sunset, and daylight duration for a selected location. It also shows a chart for the current year. The times use the time zone of the selected location.
+This web app shows sunrise, sunset, and the duration of the current day or night for a selected location. It also shows a chart for the current year, switching between daylight and nighttime when the sun rises or sets. The times use the time zone of the selected location.
 
 ![Daylight hours app showing sunrise, sunset, and the annual daylight chart](docs/screenshot.png)
 
-The heading shows the time until the next sunrise or sunset. It uses the clock on your device. The arc widens with the displayed duration, reaching its maximum width at 18 hours; its marker shows elapsed time through the current day or night, not the sun’s actual position. At night, its duration runs from sunset to the next sunrise.
+The heading shows the time until the next sunrise or sunset. It uses the clock on your device. The card shows the percentage of the current day or night that has elapsed, updating with the clock. The percentage is unavailable when the interval’s endpoints are unknown; chart previews show the selected date’s duration instead. The arc widens with the duration, reaching its maximum width at 18 hours; its marker shows elapsed time through the current day or night, not the sun’s actual position. At night, its duration runs from sunset to the next sunrise.
 
-Hover over or touch the yearly chart to show that date’s sunrise, sunset, and daylight duration in the top card. You can also focus the chart and use the arrow keys. The countdown stays on the current day; the card returns to the current day or night when you leave the chart or tap outside it. The elapsed-time marker is hidden while exploring the chart.
+Use the toggle at the top right of the yearly chart to enable or disable date selection. It starts off on touch-first devices and on otherwise. When enabled, hover or touch the chart, or focus it and use the arrow keys, to show a date in the top card. At night, each date represents the night from that date’s sunset to the following sunrise. The countdown stays on the current day; the card returns to the current day or night when you leave the chart, focus elsewhere, tap outside, or turn exploration off. The elapsed-time marker is hidden while exploring the chart.
 
 Search for a city to select a location. The URL then includes the location parameters `lat`, `lon`, `tz`, and `n`. You can share this URL.
 

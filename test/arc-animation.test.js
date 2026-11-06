@@ -52,7 +52,7 @@ function element({ hidden = false, clientWidth = 0, offsetWidth = 0 } = {}) {
   return el;
 }
 
-function setup({ reduced = false } = {}) {
+function setup({ reduced = false, touchFirst = false } = {}) {
   let time = 0;
   let nextId = 1;
   let requests = 0;
@@ -76,7 +76,7 @@ function setup({ reduced = false } = {}) {
   }
 
   const ids = Object.fromEntries([
-    'location-input', 'location-clear', 'location-dropdown', 'chart', 'chart-wrap', 'chart-detail', 'retry',
+    'location-input', 'location-clear', 'location-dropdown', 'chart', 'chart-wrap', 'chart-detail', 'chart-title', 'chart-description', 'chart-toggle', 'app-title', 'retry',
     'period-marker', 'period-start-point', 'period-end-point', 'period-start-label', 'period-end-label',
     'period-start-time', 'period-end-time', 'duration', 'period-state', 'period-detail'
   ].map((id) => [id, element({ hidden: id === 'period-marker' || id.endsWith('-point') })]));
@@ -103,7 +103,7 @@ function setup({ reduced = false } = {}) {
     location: { search: '', pathname: '/', hash: '' },
     matchMedia(query) {
       mediaQueries.push(query);
-      return query === '(prefers-reduced-motion: reduce)' ? motion : { matches: false, addEventListener() {}, addListener() {} };
+      return query === '(prefers-reduced-motion: reduce)' ? motion : { matches: query === '(hover: none) and (pointer: coarse)' && touchFirst, addEventListener() {}, addListener() {} };
     },
     addEventListener() {}
   };
@@ -120,20 +120,34 @@ function setup({ reduced = false } = {}) {
     formatTime: (timestamp, timeZone) => context.formatTime(timestamp, timeZone),
     formatDuration: (seconds) => context.formatDuration(seconds),
     formatDurationDifference: (seconds, todaySeconds) => context.formatDurationDifference(seconds, todaySeconds),
+    sunIsUp: (day, now) => context.sunIsUp(day, now),
+    nightFor: (days, index) => context.nightFor(days, index),
+    setMode: (day) => context.setDisplayMode(day, 'Test City'),
+    title: () => document.title,
+    setCurrent(day, previous = null, next = null) {
+      context.__currentDay = day;
+      context.__previousDay = previous;
+      context.__nextDay = next;
+      vm.runInContext(`updateCurrentVisual = () => updateDaylightVisual(__currentDay, __previousDay, __nextDay, 'UTC');
+        updateCurrentVisual();`, context);
+    },
+    refreshCurrent() { vm.runInContext('updateCurrentVisual()', context); },
     update(day, previous = null, next = null, preview = false) {
       lastUpdateTime = (epoch + time) / 1000;
       context.updateDaylightVisual(day, previous, next, 'UTC', preview);
     },
-    renderChart(days, current) {
+    renderChart(days, current, followingDay = null) {
       context.__testDays = days;
       context.__testCurrent = current;
+      context.__followingDay = followingDay;
       vm.runInContext(`updateCurrentVisual = () => updateDaylightVisual(__testCurrent, null, null, 'UTC');
-        renderChart(__testDays, __testCurrent.date, 'UTC');`, context);
+        renderChart(__testDays, __testCurrent.date, 'UTC', undefined, __followingDay);`, context);
       const hitArea = ids.chart.children.find((child) => child.getAttribute('class') === 'chart-hit');
       assert.ok(hitArea, 'chart has an interactive hit area');
       return hitArea;
     },
     redrawChart() { vm.runInContext('redrawChart()', context); },
+    chartHit() { return ids.chart.children.find((child) => child.getAttribute('class') === 'chart-hit'); },
     setReduced(value) { motion.matches = value; for (const fn of listeners) fn({ matches: value, media: '(prefers-reduced-motion: reduce)' }); },
     pending: () => frames.size,
     requests: () => requests,
@@ -225,6 +239,87 @@ function waitForIntermediate(app, from, to) {
   }
   assert.fail('expected a rendered intermediate width before the animation settled');
 }
+
+test('current daylight displays the live elapsed percentage without a toggle', () => {
+  const app = setup();
+  const current = day(8, 0.25);
+  app.setCurrent(current);
+  assert.equal(app.ids.duration.textContent, '25%');
+  assert.equal(app.ids.duration.getAttribute('aria-pressed'), null);
+  assert.equal(app.ids.duration.getAttribute('aria-label'), 'daylight: 25 percent elapsed');
+  assert.equal(app.ids['period-state'].textContent, 'elapsed');
+  const width = geometry(app).width;
+  app.ids.duration.dispatch('click');
+  assert.equal(app.ids.duration.textContent, '25%', 'clicking does not change the display');
+  near(geometry(app).width, width, 'the arc still represents total duration');
+  app.tick(48 * 60 * 1000);
+  app.refreshCurrent();
+  assert.equal(app.ids.duration.textContent, '35%', 'percentage follows the clock');
+  checkMarker(app, current);
+});
+
+test('elapsed nighttime uses the actual sunset-to-sunrise interval before and after midnight', () => {
+  const base = epoch / 1000;
+  const cases = [
+    { current: { date: '2025-06-21', sunrise: base + 10 * hour, sunset: base + 20 * hour, duration: 10 * hour }, previous: { sunset: base - 2 * hour }, next: null },
+    { current: { date: '2025-06-21', sunrise: base - 12 * hour, sunset: base - 2 * hour, duration: 10 * hour }, previous: null, next: { sunrise: base + 10 * hour } }
+  ];
+  for (const { current, previous, next } of cases) {
+    const app = setup();
+    app.setCurrent(current, previous, next);
+    assert.equal(app.ids.duration.textContent, '16%');
+    assert.equal(app.ids.duration.getAttribute('aria-label'), 'nighttime: 16 percent elapsed');
+    app.tick(4 * hour * 1000);
+    app.refreshCurrent();
+    assert.equal(app.ids.duration.textContent, '50%');
+  }
+});
+
+test('elapsed percentage follows the transition from daylight to night and back', () => {
+  const app = setup();
+  const base = epoch / 1000;
+  const today = { date: '2025-06-21', sunrise: base - 7 * hour, sunset: base + hour, duration: 8 * hour };
+  const tomorrow = { date: '2025-06-22', sunrise: base + 13 * hour, sunset: base + 23 * hour, duration: 10 * hour };
+  app.setCurrent(today, null, tomorrow);
+  assert.equal(app.ids.duration.textContent, '87%');
+  app.tick(hour * 1000);
+  app.refreshCurrent();
+  assert.equal(app.ids.duration.textContent, '0%', 'sunset starts a new nighttime interval');
+  assert.match(app.ids.duration.getAttribute('aria-label'), /^nighttime:/);
+  app.tick(6 * hour * 1000);
+  app.refreshCurrent();
+  assert.equal(app.ids.duration.textContent, '50%');
+  app.tick(6 * hour * 1000);
+  app.setCurrent(tomorrow, today);
+  assert.equal(app.ids.duration.textContent, '0%', 'sunrise starts a new daylight interval');
+  assert.match(app.ids.duration.getAttribute('aria-label'), /^daylight:/);
+});
+
+test('chart previews show duration and periods without endpoints do not invent a percentage', () => {
+  const app = setup();
+  const current = day(8);
+  const days = [{ ...day(4), date: '2025-06-20' }, current, { ...day(12), date: '2025-06-22' }];
+  const hit = app.renderChart(days, current);
+  assert.equal(app.ids.duration.textContent, '25%');
+  hit.dispatch('focus');
+  assert.equal(app.ids.duration.textContent, '8h00m', 'exploring today shows its duration');
+  hit.dispatch('pointermove', { clientX: 12, pointerType: 'mouse' });
+  assert.equal(app.ids.duration.textContent, '4h00m');
+  assert.equal(app.ids['period-state'].textContent, 'Jun 20', 'exploration still shows the selected date');
+  hit.dispatch('pointerleave', { pointerType: 'mouse' });
+  assert.equal(app.ids.duration.textContent, '25%', 'return restores the percentage view');
+  assert.equal(app.ids['period-state'].textContent, 'elapsed');
+
+  for (const missing of [null, { date: '2025-06-21', sunrise: null, sunset: null, duration: 0 },
+    { date: '2025-06-21', sunrise: null, sunset: null, duration: 86400 },
+    { date: '2025-06-21', sunrise: epoch / 1000, sunset: null, duration: null }]) {
+    app.setCurrent(missing);
+    assert.equal(app.ids.duration.textContent, '—');
+    assert.match(app.ids.duration.getAttribute('aria-label'), /elapsed percentage unavailable/);
+  }
+  app.setCurrent(current);
+  assert.equal(app.ids.duration.textContent, '25%', 'percentage returns when endpoints are known');
+});
 
 test('initial and post-loading arcs snap to their widths without scheduling animation', () => {
   for (const withLoading of [false, true]) {
@@ -322,7 +417,7 @@ test('returning from preview animates to current daylight in about 180 ms', () =
     app.update(current);
     near(geometry(app).width, targetWidth(previewHours), 'return starts at the preview width');
     assert.ok(app.pending() > 0, 'return schedules a frame');
-    assert.equal(app.ids.duration.textContent, `${currentHours}h00m`);
+    assert.equal(app.ids.duration.textContent, '75%');
     checkMarker(app, current);
     app.tick(16);
     app.tick(74);
@@ -581,6 +676,94 @@ function key(hit, name) {
   assert.ok(prevented, `${name} is handled`);
 }
 
+test('sun state handles ordinary, partial, and continuous polar days', () => {
+  const app = setup();
+  const normal = { sunrise: 100, sunset: 200, duration: 100 };
+  assert.equal(app.sunIsUp(normal, 99), false);
+  assert.equal(app.sunIsUp(normal, 100), true);
+  assert.equal(app.sunIsUp(normal, 200), false);
+  assert.equal(app.sunIsUp({ sunrise: 200, sunset: 100, duration: 100 }, 50), true);
+  assert.equal(app.sunIsUp({ sunrise: 200, sunset: 100, duration: 100 }, 150), false);
+  assert.equal(app.sunIsUp({ sunrise: 100, sunset: null, duration: null }, 99), false);
+  assert.equal(app.sunIsUp({ sunrise: 100, sunset: null, duration: null }, 100), true);
+  assert.equal(app.sunIsUp({ sunrise: null, sunset: 100, duration: null }, 99), true);
+  assert.equal(app.sunIsUp({ sunrise: null, sunset: 100, duration: null }, 100), false);
+  assert.equal(app.sunIsUp({ sunrise: null, sunset: null, duration: 0 }, 100), false);
+  assert.equal(app.sunIsUp({ sunrise: null, sunset: null, duration: 86400 }, 100), true);
+  assert.equal(app.sunIsUp(null, 100), null);
+});
+
+test('night intervals use the following sunrise, including DST and year boundaries', () => {
+  const app = setup();
+  const seconds = (value) => Date.parse(value) / 1000;
+  const spring = [
+    { sunset: seconds('2026-03-08T02:00:00Z') }, // 6 pm PST
+    { sunrise: seconds('2026-03-08T14:00:00Z') } // 7 am PDT
+  ];
+  const autumn = [
+    { sunset: seconds('2026-11-01T01:00:00Z') }, // 6 pm PDT
+    { sunrise: seconds('2026-11-01T15:00:00Z') } // 7 am PST
+  ];
+  assert.equal(app.nightFor(spring, 0).duration, 12 * hour);
+  assert.equal(app.nightFor(autumn, 0).duration, 14 * hour);
+  const boundary = [{ sunset: seconds('2025-12-31T18:00:00Z') }, { sunrise: seconds('2026-01-01T07:00:00Z') }];
+  assert.equal(app.nightFor(boundary, 0).duration, 13 * hour);
+  assert.equal(app.nightFor([boundary[0]], 0).duration, null, 'missing sunrise is not estimated');
+  assert.equal(app.nightFor([{ sunset: null }, boundary[1]], 0).duration, null, 'no sunset means no interval');
+  assert.equal(app.nightFor([{ sunset: 100 }, { sunrise: null, sunset: null }, { sunrise: 300 }], 0).duration, 200, 'find a later polar sunrise');
+  assert.equal(app.nightFor([{ sunset: 100 }, { sunrise: null, sunset: 200 }, { sunrise: 300 }], 0).duration, null, 'do not cross a second sunset');
+  assert.equal(app.nightFor([{ sunset: 100, sunrise: 150 }], 0).duration, 50, 'sunset can precede sunrise on the same local date');
+});
+
+test('yearly night chart plots sunset to the following sunrise and previews nights', () => {
+  const app = setup();
+  const utc = (date, time) => Date.parse(`${date}T${time}:00Z`) / 1000;
+  const date = (value, sunrise, sunset) => ({ date: value, sunrise: utc(value, sunrise), sunset: utc(value, sunset), duration: 12 * hour });
+  const days = [date('2025-12-30', '06:00', '18:00'), date('2025-12-31', '06:00', '18:00')];
+  const following = date('2026-01-01', '07:00', '18:00');
+  app.setMode({ sunrise: null, sunset: null, duration: 0 });
+  const hit = app.renderChart(days, days[0], following);
+  const band = app.ids.chart.children.find((child) => child.getAttribute('class') === 'night-band');
+  assert.ok(band, 'nighttime band is drawn');
+  assert.equal(app.ids.chart.children.some((child) => child.getAttribute('class') === 'daylight-band'), false);
+  const sunsetLine = app.ids.chart.children.find((child) => child.getAttribute('class') === 'sun-line sunset-line');
+  const sunriseLine = app.ids.chart.children.find((child) => child.getAttribute('class') === 'sun-line sunrise-line');
+  assert.ok(Number(sunsetLine.getAttribute('points').split(',')[1].split(' ')[0]) < Number(sunriseLine.getAttribute('points').split(',')[1].split(' ')[0]), 'sunset is above the following sunrise');
+  hit.dispatch('pointermove', { clientX: 688, pointerType: 'mouse' });
+  assert.match(hit.getAttribute('aria-valuetext'), /Dec 31: sunset 06:00PM, following sunrise 07:00AM, 13 hours 0 minutes nighttime/);
+  assert.equal(app.ids.duration.textContent, '13h00m');
+  assert.equal(app.ids.duration.getAttribute('aria-label'), 'nighttime: 13 hours 0 minutes');
+  assert.equal(app.ids['period-start-label'].textContent, 'sunset');
+  assert.equal(app.ids['period-end-label'].textContent, 'sunrise');
+  near(geometry(app).width, targetWidth(13), 'preview uses the following sunrise');
+});
+
+test('mode switches automatically at sunrise and sunset and highlights the current night before sunrise', () => {
+  const app = setup();
+  const now = epoch / 1000;
+  const previous = { date: '2025-06-20', sunrise: now - 14 * hour, sunset: now - 2 * hour, duration: 12 * hour };
+  const current = { date: '2025-06-21', sunrise: now + 60, sunset: now + 120, duration: 60 };
+  const next = { date: '2025-06-22', sunrise: now + 10 * hour, sunset: now + 20 * hour, duration: 10 * hour };
+  app.renderChart([previous, current, next], current);
+  app.setMode(current);
+  assert.equal(app.ids['app-title'].textContent, 'nighttime hours');
+  assert.equal(app.ids['chart-title'].textContent, 'the year at night');
+  assert.equal(app.title(), 'nighttime - test city');
+  assert.equal(app.chartHit().getAttribute('aria-valuenow'), '1', 'before sunrise the marker is on the previous sunset');
+  assert.match(app.chartHit().getAttribute('aria-valuetext'), /2 hours 1 minutes nighttime/);
+  app.tick(60000);
+  app.setMode(current);
+  assert.equal(app.ids['app-title'].textContent, 'daylight hours');
+  assert.equal(app.ids['chart-title'].textContent, 'the year in daylight');
+  assert.equal(app.chartHit().getAttribute('aria-valuenow'), '2');
+  assert.equal(app.ids.chart.children.some((child) => child.getAttribute('class') === 'night-band'), false);
+  assert.ok(app.ids.chart.children.some((child) => child.getAttribute('class') === 'sun-line sunrise-line'));
+  app.tick(60000);
+  app.setMode(current);
+  assert.equal(app.ids['app-title'].textContent, 'nighttime hours');
+  assert.equal(app.chartHit().getAttribute('aria-valuenow'), '2', 'after sunset the marker is on tonight');
+});
+
 test('year chart keeps grid lines without time axis labels', () => {
   const { app, hit } = lineChart();
   const labels = app.ids.chart.children.filter((child) => child.getAttribute('class') === 'axis-label time-axis-label');
@@ -619,12 +802,75 @@ test('year-chart hover line follows every pointer selection immediately', () => 
     assert.equal(hit.getAttribute('aria-valuenow'), String(index + 1));
     assert.equal(app.pending(), 0, 'scrubbing does not schedule a frame');
   }
-  hit.dispatch('pointerdown', { clientX: chartXs[4], pointerType: 'touch' });
-  assertLine(cursor, chartXs[4], 'visible');
-  hit.dispatch('pointerleave', { pointerType: 'touch' });
-  assertLine(cursor, chartXs[4], 'visible');
-  assert.equal(app.pending(), 0, 'touch leave preserves the selection');
   assert.equal(app.requests(), requests, 'scrubbing never animates the line');
+});
+
+test('chart exploration defaults off on touch-first devices and on otherwise', () => {
+  for (const touchFirst of [true, false]) {
+    const { app, hit } = lineChart({ touchFirst });
+    assert.equal(app.ids['chart-toggle'].getAttribute('aria-pressed'), String(!touchFirst));
+    assert.equal(app.ids['chart-wrap'].classList.contains('is-interactive'), !touchFirst);
+    assert.equal(app.ids.chart.getAttribute('role'), touchFirst ? 'img' : 'group');
+    assert.equal(hit.getAttribute('role'), touchFirst ? null : 'slider');
+    assert.equal(hit.getAttribute('aria-hidden'), touchFirst ? 'true' : null);
+    assert.equal(hit.getAttribute('tabindex'), touchFirst ? null : '0');
+    assert.match(app.ids['chart-description'].textContent, touchFirst ? /exploration is off/ : /arrow keys to explore/);
+  }
+});
+
+test('the exploration toggle enables touch scrubbing and resets the chart when disabled', () => {
+  const app = setup({ touchFirst: true });
+  const current = day(8);
+  const days = [4, 6, 8, 10, 12].map((hours, index) => ({ ...day(hours), date: `2025-06-${19 + index}` }));
+  let hit = app.renderChart(days, current);
+  hit.dispatch('pointerdown', { clientX: chartXs[0], pointerType: 'touch' });
+  hit.dispatch('pointermove', { clientX: chartXs[4], pointerType: 'touch' });
+  hit.dispatch('focus');
+  near(geometry(app).width, targetWidth(8), 'touch and focus are ignored when disabled');
+  assert.equal(app.pending(), 0);
+
+  app.ids['chart-toggle'].dispatch('click');
+  assert.equal(app.ids['chart-toggle'].getAttribute('aria-pressed'), 'true');
+  hit = app.chartHit();
+  assert.equal(hit.getAttribute('role'), 'slider');
+  hit.dispatch('pointerdown', { clientX: chartXs[0], pointerType: 'touch' });
+  near(geometry(app).width, targetWidth(4), 'touch down selects a date');
+  hit.dispatch('pointermove', { clientX: chartXs[4], pointerType: 'touch' });
+  near(geometry(app).width, targetWidth(12), 'touch drag selects another date');
+  assert.equal(hit.getAttribute('aria-valuenow'), '5');
+  hit.dispatch('pointerleave', { pointerType: 'touch' });
+  assert.equal(hit.getAttribute('aria-valuenow'), '5', 'touch selection stays until dismissed');
+
+  app.ids['chart-toggle'].dispatch('click');
+  hit = app.chartHit();
+  assert.equal(app.ids['chart-toggle'].getAttribute('aria-pressed'), 'false');
+  assert.equal(hit.getAttribute('aria-hidden'), 'true');
+  assert.equal(app.ids.duration.textContent, '25%', 'disabling returns to the current day');
+  app.finish();
+  near(geometry(app).width, targetWidth(8), 'return animation finishes at the current day');
+  hit.dispatch('pointermove', { clientX: chartXs[0], pointerType: 'mouse' });
+  hit.dispatch('keydown', { key: 'End', preventDefault() { assert.fail('disabled chart handled a key'); } });
+  near(geometry(app).width, targetWidth(8), 'disabled chart ignores mouse and keyboard');
+
+  app.ids['chart-toggle'].dispatch('click');
+  hit = app.chartHit();
+  pointerAt(hit, 0);
+  assert.equal(hit.getAttribute('aria-valuenow'), '1', 'mouse exploration works when re-enabled');
+  key(hit, 'End');
+  assert.equal(hit.getAttribute('aria-valuenow'), '5', 'keyboard exploration works when re-enabled');
+});
+
+test('exploration can be toggled before chart data loads and survives redraws and mode changes', () => {
+  const app = setup({ touchFirst: true });
+  app.ids['chart-toggle'].dispatch('click');
+  const current = day(8);
+  const days = ['20', '21', '22'].map((date) => ({ ...current, date: `2025-06-${date}` }));
+  app.renderChart(days, current);
+  app.redrawChart();
+  assert.equal(app.chartHit().getAttribute('role'), 'slider');
+  app.setMode({ sunrise: null, sunset: null, duration: 0 });
+  assert.equal(app.ids['chart-toggle'].getAttribute('aria-pressed'), 'true');
+  assert.equal(app.chartHit().getAttribute('role'), 'slider');
 });
 
 test('mouse leave and keyboard blur ease the hover line from the selected date to today', () => {

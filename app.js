@@ -22,7 +22,32 @@ let chartPreview;
 let updateCurrentVisual;
 let outsidePointer;
 let chartReturn;
+let chartNight = false;
+let chartInteractive = !window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 
+function updateChartDescription() {
+  const chartText = chartNight
+    ? 'The upper line shows sunset and the lower line shows the following sunrise, from noon to noon. The shaded area shows the night beginning on each date.'
+    : 'The upper line shows sunrise and the lower line shows sunset. The shaded area shows daylight.';
+  const interactionText = chartInteractive
+    ? 'Focus the chart and use the left and right arrow keys to explore dates.'
+    : 'Chart exploration is off. Use the explore toggle to enable it.';
+  $('chart-description').textContent = `${chartText} The dashed line marks today. ${interactionText}`;
+}
+
+function updateChartToggle() {
+  $('chart-toggle').setAttribute('aria-pressed', String(chartInteractive));
+  $('chart-wrap').classList.toggle('is-interactive', chartInteractive);
+  updateChartDescription();
+}
+
+updateChartToggle();
+$('chart-toggle').addEventListener('click', () => {
+  if (chartInteractive) resetChartSelection?.();
+  chartInteractive = !chartInteractive;
+  updateChartToggle();
+  redrawChart?.();
+});
 const fullscreenLayout = window.matchMedia('(max-width:600px), (max-height:500px) and (pointer:coarse)');
 new ResizeObserver(() => redrawChart?.()).observe($('chart-wrap'));
 
@@ -86,6 +111,53 @@ function formatCountdown(milliseconds) {
 
 function hasSunEvents(day) {
   return day && day.duration > 0 && day.duration < 86400 && Number.isFinite(day.sunrise) && Number.isFinite(day.sunset);
+}
+
+// A partial polar day can have just one event; its position still determines
+// whether the sun is currently up. A missing observation leaves the mode alone.
+function sunIsUp(day, now = Date.now() / 1000) {
+  if (!day) return null;
+  const sunrise = Number.isFinite(day.sunrise) ? day.sunrise : null;
+  const sunset = Number.isFinite(day.sunset) ? day.sunset : null;
+  if (sunrise !== null && sunset !== null) {
+    return sunrise < sunset ? now >= sunrise && now < sunset : now < sunset || now >= sunrise;
+  }
+  if (sunrise !== null) return now >= sunrise;
+  if (sunset !== null) return now < sunset;
+  if (day.duration === 0) return false;
+  if (day.duration === 86400) return true;
+  return null;
+}
+
+function setDisplayMode(day, locationName) {
+  const isUp = sunIsUp(day);
+  if (isUp === null) return;
+  const night = !isUp;
+  const changed = chartNight !== night;
+  chartNight = night;
+  $('app-title').textContent = night ? 'nighttime hours' : 'daylight hours';
+  $('chart-title').textContent = night ? 'the year at night' : 'the year in daylight';
+  updateChartDescription();
+  document.title = `${night ? 'nighttime' : 'daylight'} - ${locationName.toLowerCase()}`;
+  if (changed) redrawChart?.();
+}
+
+// Nights are keyed by the date of sunset. A missing next sunrise remains
+// unavailable rather than being estimated from a 24-hour calendar day.
+function nightFor(days, index) {
+  const start = days[index]?.sunset;
+  if (!Number.isFinite(start)) return { start: null, end: null, duration: null };
+  for (let i = index; i < days.length; i++) {
+    const events = [
+      { time: days[i].sunrise, type: 'sunrise' },
+      ...(i === index ? [] : [{ time: days[i].sunset, type: 'sunset' }])
+    ].filter((event) => Number.isFinite(event.time) && event.time > start).sort((a, b) => a.time - b.time);
+    if (events.length) {
+      const end = events[0].type === 'sunrise' ? events[0].time : null;
+      return { start, end, duration: end === null ? null : end - start };
+    }
+  }
+  return { start, end: null, duration: null };
 }
 
 function updateHeading(today, tomorrow) {
@@ -214,23 +286,22 @@ reducedMotion.addEventListener('change', () => {
 });
 
 // The arc shows elapsed time, not the sun's actual altitude.
-function updateDaylightVisual(day, previousDay, nextDay, timeZone, preview = false) {
+function updateDaylightVisual(day, previousDay, nextDay, timeZone, preview = false, nightPreview = null) {
   const hasEvents = hasSunEvents(day);
   const isPartial = day?.duration === null;
   const hasDay = hasEvents && day.sunrise < day.sunset;
   const now = Date.now() / 1000;
-  const isDaylight = hasDay && now >= day.sunrise && now < day.sunset;
   const isBeforeSunrise = hasDay && now < day.sunrise;
-  const isNight = !preview && Boolean((hasDay && !isDaylight) || (day && !hasEvents && !isPartial && day.duration <= 0));
+  const isNight = preview ? Boolean(nightPreview) : sunIsUp(day, now) === false;
   // Before sunrise, use the night currently ending; after sunset, use tonight.
-  const nightStart = isBeforeSunrise ? previousDay?.sunset : day?.sunset;
-  const nightEnd = isBeforeSunrise ? day?.sunrise : nextDay?.sunrise;
-  const hasNight = hasDay && Number.isFinite(nightStart) && Number.isFinite(nightEnd) && nightEnd > nightStart;
+  const nightStart = nightPreview ? nightPreview.start : isBeforeSunrise ? previousDay?.sunset : day?.sunset;
+  const nightEnd = nightPreview ? nightPreview.end : isBeforeSunrise ? day?.sunrise : nextDay?.sunrise;
+  const hasNight = (nightPreview || hasDay) && Number.isFinite(nightStart) && Number.isFinite(nightEnd) && nightEnd > nightStart;
   const start = isNight ? nightStart : day?.sunrise;
   const end = isNight ? nightEnd : day?.sunset;
   const hasPeriod = isNight ? hasNight : hasDay;
   // Continuous daylight or nighttime has a duration but no event endpoints.
-  const hasContinuousPeriod = Boolean(day && !hasEvents && !isPartial && (isNight || day.duration >= 86400));
+  const hasContinuousPeriod = Boolean(!nightPreview && day && !hasEvents && !isPartial && (isNight || day.duration >= 86400));
   const hasArc = hasPeriod || hasContinuousPeriod;
   const marker = periodMarker;
   const visual = periodVisual;
@@ -238,15 +309,18 @@ function updateDaylightVisual(day, previousDay, nextDay, timeZone, preview = fal
   visual.classList.toggle('is-night', isNight);
   $('period-start-label').textContent = isNight ? 'sunset' : 'sunrise';
   $('period-end-label').textContent = isNight ? 'sunrise' : 'sunset';
-  $('period-start-time').textContent = !day ? '—' : isPartial ? (Number.isFinite(day.sunrise) ? formatTime(day.sunrise, timeZone) : 'No sunrise') : !hasEvents ? (isNight ? 'No sunset' : 'No sunrise') : formatTime(start, timeZone);
-  $('period-end-time').textContent = !day ? '—' : isPartial ? (Number.isFinite(day.sunset) ? formatTime(day.sunset, timeZone) : 'No sunset') : !hasEvents ? (isNight ? 'No sunrise' : 'No sunset') : formatTime(end, timeZone);
-  $('duration').textContent = !day || isPartial ? '—' : !hasEvents ? formatDuration(preview ? day.duration : 86400)
+  $('period-start-time').textContent = nightPreview ? (Number.isFinite(start) ? formatTime(start, timeZone) : 'No sunset') : !day ? '—' : isPartial ? (Number.isFinite(isNight ? day.sunset : day.sunrise) ? formatTime(isNight ? day.sunset : day.sunrise, timeZone) : isNight ? 'No sunset' : 'No sunrise') : !hasEvents ? (isNight ? 'No sunset' : 'No sunrise') : formatTime(start, timeZone);
+  $('period-end-time').textContent = nightPreview ? (Number.isFinite(end) ? formatTime(end, timeZone) : '—') : !day ? '—' : isPartial ? (Number.isFinite(isNight ? day.sunrise : day.sunset) ? formatTime(isNight ? day.sunrise : day.sunset, timeZone) : isNight ? 'No sunrise' : 'No sunset') : !hasEvents ? (isNight ? 'No sunrise' : 'No sunset') : formatTime(end, timeZone);
+  const duration = nightPreview ? formatDuration(nightPreview.duration) : !day || isPartial ? '—' : !hasEvents ? formatDuration(preview ? day.duration : 86400)
     : isNight ? (hasNight ? formatDuration(end - start) : '—') : formatDuration(day.duration);
-  $('duration').setAttribute('aria-label', `${isNight ? 'nighttime' : 'daylight'}: ${spokenDuration($('duration').textContent)}`);
-  const state = !day ? '' : isPartial ? 'one event today' : !hasEvents ? (day.duration <= 0 ? 'polar night' : 'midnight sun')
+  const canShowElapsed = !preview && Boolean(hasPeriod) && now >= start && now < end;
+  const elapsed = canShowElapsed ? Math.floor((now - start) / (end - start) * 100) : null;
+  $('duration').textContent = preview ? duration : canShowElapsed ? `${elapsed}%` : '—';
+  $('duration').setAttribute('aria-label', `${isNight ? 'nighttime' : 'daylight'}: ${preview ? spokenDuration(duration) : canShowElapsed ? `${elapsed} percent elapsed` : 'elapsed percentage unavailable'}`);
+  const state = nightPreview ? (hasNight ? '' : 'unavailable') : !day ? '' : isPartial ? 'one event today' : !hasEvents ? (day.duration <= 0 ? 'polar night' : 'midnight sun')
     : !hasDay ? 'events cross midnight' : isNight && !hasNight ? 'unavailable' : '';
-  $('period-state').textContent = [day && formatDate(day.date, { month: 'short', day: 'numeric' }), state].filter(Boolean).join(' · ');
-  $('period-detail').textContent = isNight && hasNight ? `From sunset at ${formatTime(start, timeZone)} to ${isBeforeSunrise ? 'today’s' : 'tomorrow’s'} sunrise at ${formatTime(end, timeZone)}.` : '';
+  $('period-state').textContent = canShowElapsed ? 'elapsed' : [day && formatDate(day.date, { month: 'short', day: 'numeric' }), state].filter(Boolean).join(' · ');
+  $('period-detail').textContent = isNight && hasNight ? `From sunset at ${formatTime(start, timeZone)} to ${nightPreview ? 'the following' : isBeforeSunrise ? 'today’s' : 'tomorrow’s'} sunrise at ${formatTime(end, timeZone)}.` : '';
   document.querySelectorAll('.period-arc').forEach((arc) => arc.toggleAttribute('hidden', !hasArc));
   $('period-start-point').hidden = $('period-end-point').hidden = !hasPeriod;
   marker.hidden = preview || !hasPeriod || now < start || now >= end;
@@ -303,8 +377,13 @@ function chartTimeBadge(parent, x, y, anchor, value, className, bounds) {
   for (const [name, value] of Object.entries({ x: left, y: y - fontSize / 2 - paddingY, width: textWidth + paddingX * 2, height: fontSize + paddingY * 2, rx: fontSize * 0.32 })) rect.setAttribute(name, value);
 }
 
-function renderChart(days, today, timeZone, selection) {
+function renderChart(days, today, timeZone, selection, followingDay = null) {
   stopChartReturn();
+  const night = chartNight;
+  const nightDays = followingDay ? [...days, followingDay] : days;
+  const nights = night ? days.map((_, index) => nightFor(nightDays, index)) : null;
+  const upperKey = night ? 'sunset' : 'sunrise';
+  const lowerKey = night ? 'sunrise' : 'sunset';
   chart.replaceChildren();
   const width = 700, left = 12, right = 12;
   const bounds = $('chart-wrap').getBoundingClientRect();
@@ -319,12 +398,27 @@ function renderChart(days, today, timeZone, selection) {
     const parts = Object.fromEntries(localTime.formatToParts(timestamp * 1000).map(({ type, value }) => [type, value]));
     return Number(parts.hour) + Number(parts.minute) / 60 + Number(parts.second) / 3600;
   };
-  const points = days.map((day, index) => hasSunEvents(day) || day.duration === null
-    ? { x: xFor(index), sunrise: Number.isFinite(day.sunrise) ? localHours(day.sunrise) : null, sunset: Number.isFinite(day.sunset) ? localHours(day.sunset) : null }
-    : null);
+  const points = days.map((day, index) => {
+    if (night) {
+      const period = nights[index];
+      const clock = (time) => Number.isFinite(time) ? (localHours(time) + 12) % 24 : null;
+      const sunset = clock(period.start), sunrise = clock(period.end);
+      // Noon-to-noon cannot represent a longer or midnight-wrapping interval.
+      if (period.duration > 86400 || (sunset !== null && sunrise !== null && sunset > sunrise)) return null;
+      return sunset !== null || sunrise !== null ? { x: xFor(index), sunset, sunrise } : null;
+    }
+    return hasSunEvents(day) || day.duration === null
+      ? { x: xFor(index), sunrise: Number.isFinite(day.sunrise) ? localHours(day.sunrise) : null, sunset: Number.isFinite(day.sunset) ? localHours(day.sunset) : null }
+      : null;
+  });
   const todayIndex = days.findIndex((day) => day.date === today);
+  // Before sunrise the ongoing night began yesterday, not tonight.
+  const todayDay = days[todayIndex];
+  const currentIndex = night && todayIndex > 0 && Number.isFinite(todayDay?.sunrise) &&
+    Date.now() / 1000 < todayDay.sunrise && nights[todayIndex - 1].end === todayDay.sunrise
+    ? todayIndex - 1 : todayIndex;
   chart.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  chart.setAttribute('role', 'group');
+  chart.setAttribute('role', chartInteractive ? 'group' : 'img');
 
   for (let hours = 0; hours <= 24; hours += 3) {
     const y = yFor(hours);
@@ -360,16 +454,16 @@ function renderChart(days, today, timeZone, selection) {
   let band = [];
   const drawBand = () => {
     if (band.length > 1) {
-      const upper = band.map((point) => `${point.x},${yFor(point.sunrise)}`).join(' ');
-      const lower = [...band].reverse().map((point) => `${point.x},${yFor(point.sunset)}`).join(' ');
-      chart.append(svgElement('polygon', { points: `${upper} ${lower}`, class: 'daylight-band' }));
+      const upper = band.map((point) => `${point.x},${yFor(point[upperKey])}`).join(' ');
+      const lower = [...band].reverse().map((point) => `${point.x},${yFor(point[lowerKey])}`).join(' ');
+      chart.append(svgElement('polygon', { points: `${upper} ${lower}`, class: night ? 'night-band' : 'daylight-band' }));
     }
     band = [];
   };
   points.forEach((point) => {
     const complete = point && point.sunrise !== null && point.sunset !== null;
-    if (!complete || point.sunrise > point.sunset || (band.length && (Math.abs(point.sunrise - band[band.length - 1].sunrise) > 12 || Math.abs(point.sunset - band[band.length - 1].sunset) > 12))) drawBand();
-    if (complete && point.sunrise <= point.sunset) band.push(point);
+    if (!complete || point[upperKey] > point[lowerKey] || (band.length && (Math.abs(point.sunrise - band[band.length - 1].sunrise) > 12 || Math.abs(point.sunset - band[band.length - 1].sunset) > 12))) drawBand();
+    if (complete && point[upperKey] <= point[lowerKey]) band.push(point);
   });
   drawBand();
   for (const key of ['sunrise', 'sunset']) {
@@ -378,14 +472,17 @@ function renderChart(days, today, timeZone, selection) {
     }
   }
 
-  const todayX = xFor(todayIndex);
+  const todayX = xFor(todayIndex), currentX = xFor(currentIndex);
   chart.append(svgElement('line', { x1: todayX, y1: top, x2: todayX, y2: top + plotHeight, class: 'today-line' }));
   const cursor = svgElement('line', { y1: top, y2: top + plotHeight, class: 'hover-line', visibility: 'hidden' });
   const marker = svgElement('g', { 'aria-hidden': 'true' });
   chart.append(cursor, marker);
-  const hitArea = svgElement('rect', { x: left, y: top, width: plotWidth, height: plotHeight, class: 'chart-hit', tabindex: '0', role: 'slider', 'aria-label': 'Explore dates', 'aria-valuemin': '1', 'aria-valuemax': days.length });
+  const hitArea = svgElement('rect', {
+    x: left, y: top, width: plotWidth, height: plotHeight, class: 'chart-hit',
+    ...(chartInteractive ? { tabindex: '0', role: 'slider', 'aria-label': 'Explore dates', 'aria-valuemin': '1', 'aria-valuemax': days.length } : { 'aria-hidden': 'true' })
+  });
   chart.append(hitArea);
-  let selectedIndex = selection?.index ?? todayIndex;
+  let selectedIndex = selection?.exploring ? selection.index : currentIndex;
   let exploring = selection?.exploring ?? false;
   let selectionSource = selection?.source;
   let restoringFocus = false;
@@ -394,21 +491,28 @@ function renderChart(days, today, timeZone, selection) {
     selectedIndex = Math.max(0, Math.min(days.length - 1, index));
     const day = days[selectedIndex];
     chartPreview = exploring ? day : null;
-    if (chartPreview) updateDaylightVisual(day, null, null, timeZone, true);
+    if (chartPreview) updateDaylightVisual(day, null, null, timeZone, true, night ? nights[selectedIndex] : null);
     else updateCurrentVisual?.();
     const label = formatDate(day.date, { month: 'short', day: 'numeric' });
-    const times = hasSunEvents(day) || day.duration === null
-      ? `${Number.isFinite(day.sunrise) ? `sunrise ${formatTime(day.sunrise, timeZone)}` : 'no sunrise'}, ${Number.isFinite(day.sunset) ? `sunset ${formatTime(day.sunset, timeZone)}` : 'no sunset'}`
-      : (day.duration <= 0 ? 'no sunrise or sunset' : 'midnight sun');
-    const duration = formatDuration(day.duration);
-    const difference = exploring && Number.isFinite(day.duration) && Number.isFinite(days[todayIndex].duration) ? formatDurationDifference(day.duration, days[todayIndex].duration) : '';
+    const period = night ? nights[selectedIndex] : null;
+    const times = night
+      ? `${Number.isFinite(period.start) ? `sunset ${formatTime(period.start, timeZone)}` : 'no sunset'}, ${Number.isFinite(period.end) ? `following sunrise ${formatTime(period.end, timeZone)}` : 'following sunrise unavailable'}`
+      : hasSunEvents(day) || day.duration === null
+        ? `${Number.isFinite(day.sunrise) ? `sunrise ${formatTime(day.sunrise, timeZone)}` : 'no sunrise'}, ${Number.isFinite(day.sunset) ? `sunset ${formatTime(day.sunset, timeZone)}` : 'no sunset'}`
+        : (day.duration <= 0 ? 'no sunrise or sunset' : 'midnight sun');
+    const seconds = night ? period.duration : day.duration;
+    const currentSeconds = night ? nights[currentIndex].duration : days[currentIndex].duration;
+    const duration = formatDuration(seconds);
+    const difference = exploring && Number.isFinite(seconds) && Number.isFinite(currentSeconds) ? formatDurationDifference(seconds, currentSeconds) : '';
     $('chart-detail').textContent = label;
-    hitArea.setAttribute('aria-valuenow', selectedIndex + 1);
-    hitArea.setAttribute('aria-valuetext', `${label}: ${times}, ${spokenDuration(duration)} daylight${difference ? `, ${spokenDuration(difference)} compared with today` : ''}`);
+    if (chartInteractive) {
+      hitArea.setAttribute('aria-valuenow', selectedIndex + 1);
+      hitArea.setAttribute('aria-valuetext', `${label}: ${times}, ${spokenDuration(duration)} ${night ? 'nighttime' : 'daylight'}${difference ? `, ${spokenDuration(difference)} compared with the current ${night ? 'night' : 'day'}` : ''}`);
+    }
     const x = xFor(selectedIndex);
     cursor.setAttribute('x1', x);
     cursor.setAttribute('x2', x);
-    cursor.setAttribute('visibility', selectedIndex === todayIndex ? 'hidden' : 'visible');
+    cursor.setAttribute('visibility', !exploring || selectedIndex === todayIndex ? 'hidden' : 'visible');
 
     marker.replaceChildren();
     const dateAnchor = x < left + 90 ? 'start' : x > width - right - 90 ? 'end' : 'middle';
@@ -437,14 +541,15 @@ function renderChart(days, today, timeZone, selection) {
       for (const key of ['sunrise', 'sunset']) {
         if (point[key] === null) continue;
         const y = yFor(point[key]);
-        const above = key === 'sunrise' ? y - top >= 28 : top + plotHeight - y < 28;
+        const above = key === upperKey ? y - top >= 28 : top + plotHeight - y < 28;
         marker.append(svgElement('circle', { cx: x, cy: y, r: 4, class: `chart-point ${key}-point` }));
-        chartTimeBadge(marker, labelX, y + (above ? -17 : 17), 'middle', formatTime(day[key], timeZone), 'point-label', { left, right: width - right });
+        const timestamp = night ? (key === 'sunset' ? period.start : period.end) : day[key];
+        chartTimeBadge(marker, labelX, y + (above ? -17 : 17), 'middle', formatTime(timestamp, timeZone), 'point-label', { left, right: width - right });
       }
     }
     const completePoint = point && point.sunrise !== null && point.sunset !== null;
-    const durationY = completePoint && point.sunrise <= point.sunset
-      ? (yFor(point.sunrise) + yFor(point.sunset)) / 2
+    const durationY = completePoint && point[upperKey] <= point[lowerKey]
+      ? (yFor(point[upperKey]) + yFor(point[lowerKey])) / 2
       : top + plotHeight / 2;
     const narrowBand = completePoint && Math.abs(yFor(point.sunrise) - yFor(point.sunset)) < 28;
     const durationAnchor = narrowBand ? (x > left + plotWidth / 2 ? 'end' : 'start') : 'middle';
@@ -457,15 +562,15 @@ function renderChart(days, today, timeZone, selection) {
     const from = xFor(selectedIndex);
     exploring = false;
     selectionSource = undefined;
-    selectDay(todayIndex);
-    if (from === todayX || reducedMotion.matches) return;
+    selectDay(currentIndex);
+    if (from === currentX || reducedMotion.matches) return;
     cursor.setAttribute('x1', from);
     cursor.setAttribute('x2', from);
     cursor.setAttribute('visibility', 'visible');
     const started = performance.now();
     const frame = (time) => {
       const progress = Math.min(1, Math.max(0, (time - started) / RETURN_DURATION));
-      const x = from + (todayX - from) * easeOutCubic(progress);
+      const x = from + (currentX - from) * easeOutCubic(progress);
       cursor.setAttribute('x1', x);
       cursor.setAttribute('x2', x);
       if (progress < 1) chartReturn.frame = requestAnimationFrame(frame);
@@ -474,46 +579,48 @@ function renderChart(days, today, timeZone, selection) {
         chartReturn = undefined;
       }
     };
-    chartReturn = { cursor, target: todayX, frame: requestAnimationFrame(frame) };
+    chartReturn = { cursor, target: currentX, frame: requestAnimationFrame(frame) };
   };
   selectDay(selectedIndex);
-  function selectPointerDay(event) {
-    exploring = true;
-    selectionSource = 'pointer';
-    const bounds = chart.getBoundingClientRect();
-    const x = (event.clientX - bounds.left) * width / bounds.width;
-    selectDay(Math.round((x - left) / plotWidth * (days.length - 1)));
+  if (chartInteractive) {
+    function selectPointerDay(event) {
+      exploring = true;
+      selectionSource = 'pointer';
+      const bounds = chart.getBoundingClientRect();
+      const x = (event.clientX - bounds.left) * width / bounds.width;
+      selectDay(Math.round((x - left) / plotWidth * (days.length - 1)));
+    }
+    hitArea.addEventListener('pointermove', selectPointerDay);
+    hitArea.addEventListener('pointerdown', selectPointerDay);
+    hitArea.addEventListener('pointerleave', (event) => { if (event.pointerType === 'mouse' && selectionSource === 'pointer') resetChartSelection(); });
+    hitArea.addEventListener('focus', () => {
+      if (restoringFocus) return;
+      if (!exploring) selectionSource = 'keyboard';
+      exploring = true;
+      selectDay(selectedIndex);
+    });
+    hitArea.addEventListener('blur', resetChartSelection);
+    hitArea.addEventListener('keydown', (event) => {
+      let next = selectedIndex;
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next--;
+      else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next++;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = days.length - 1;
+      else return;
+      event.preventDefault();
+      exploring = true;
+      selectionSource = 'keyboard';
+      selectDay(next);
+    });
   }
-  hitArea.addEventListener('pointermove', selectPointerDay);
-  hitArea.addEventListener('pointerdown', selectPointerDay);
-  hitArea.addEventListener('pointerleave', (event) => { if (event.pointerType === 'mouse' && selectionSource === 'pointer') resetChartSelection(); });
-  hitArea.addEventListener('focus', () => {
-    if (restoringFocus) return;
-    if (!exploring) selectionSource = 'keyboard';
-    exploring = true;
-    selectDay(selectedIndex);
-  });
-  hitArea.addEventListener('blur', resetChartSelection);
-  hitArea.addEventListener('keydown', (event) => {
-    let next = selectedIndex;
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next--;
-    else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next++;
-    else if (event.key === 'Home') next = 0;
-    else if (event.key === 'End') next = days.length - 1;
-    else return;
-    event.preventDefault();
-    exploring = true;
-    selectionSource = 'keyboard';
-    selectDay(next);
-  });
-  if (selection?.focused) {
+  if (chartInteractive && selection?.focused) {
     restoringFocus = true;
     hitArea.focus({ preventScroll: true });
     restoringFocus = false;
   }
   redrawChart = () => renderChart(days, today, timeZone, {
     index: selectedIndex, exploring, source: selectionSource, focused: document.activeElement === hitArea
-  });
+  }, followingDay);
 }
 
 async function load() {
@@ -533,7 +640,8 @@ async function load() {
   $('current-date').dateTime = today;
   $('current-date').textContent = formatDate(today, { weekday: 'long', month: 'long', day: 'numeric' });
   $('location-name').textContent = selected.name;
-  document.title = `daylight - ${selected.name.toLowerCase()}`;
+  chartNight = false;
+  setDisplayMode({ sunrise: null, sunset: null, duration: 86400 }, selected.name);
   $('today-heading').textContent = 'loading daylight times…';
   updateCurrentVisual = () => updateDaylightVisual(null, null, null, selected.tz);
   updateCurrentVisual();
@@ -545,19 +653,26 @@ async function load() {
   $('retry').hidden = true;
   // Providers share the same normalized day contract. Add or reorder adapters here.
   const { openMeteo, sunriseSunset, localSolar, getDaysWithFallback } = DaylightProviders;
-  let currentDay, annualDays;
+  let currentDay, forecastDays, annualDays, followingDay;
+  function mergeForecast() {
+    if (!forecastDays || !annualDays) return;
+    for (const day of forecastDays) {
+      const index = annualDays.findIndex((item) => item.date === day.date);
+      if (index !== -1) annualDays[index] = day;
+      else if (followingDay.date === day.date) Object.assign(followingDay, day);
+    }
+  }
   const forecast = getDaysWithFallback([openMeteo, sunriseSunset, localSolar], addDays(today, -1), addDays(today, 1), selected, loadController.signal, 'forecast')
     .then(({ days }) => {
       if (version !== loadVersion) return;
+      forecastDays = days;
       const [previousDay, todayData, nextDay] = days;
       currentDay = todayData;
       updateCurrentVisual = () => updateDaylightVisual(currentDay, previousDay, nextDay, selected.tz);
+      mergeForecast();
       scheduleClock(today, currentDay, nextDay, selected.tz);
       if (version !== loadVersion) return;
-      if (annualDays) {
-        annualDays[annualDays.findIndex((day) => day.date === today)] = currentDay;
-        redrawChart?.();
-      }
+      if (annualDays) redrawChart?.();
     }).catch((error) => {
       if (version !== loadVersion) return;
       console.error('Could not load today’s daylight data:', error);
@@ -570,13 +685,17 @@ async function load() {
       $('retry').hidden = false;
       scheduleClock(today, null, null, selected.tz);
     });
-  const annual = getDaysWithFallback([openMeteo, sunriseSunset, localSolar], start, end, selected, loadController.signal, 'annual')
+  // Include Jan 1 of the next year for Dec 31's night. On New Year's Day,
+  // include the previous Dec 31 as well, for the night still in progress.
+  const annualStart = today === start ? addDays(start, -1) : start;
+  const annual = getDaysWithFallback([openMeteo, sunriseSunset, localSolar], annualStart, addDays(end, 1), selected, loadController.signal, 'annual')
     .then(({ days }) => {
       if (version !== loadVersion) return;
-      annualDays = days;
-      // Use the same values as the card for today's marker; model grids differ.
-      if (currentDay) days[days.findIndex((day) => day.date === today)] = currentDay;
-      renderChart(days, today, selected.tz);
+      annualDays = days.slice(0, -1);
+      followingDay = days[days.length - 1];
+      // Adjacent forecast events keep the current night's interval consistent.
+      mergeForecast();
+      renderChart(annualDays, today, selected.tz, undefined, followingDay);
       $('chart-status').hidden = true;
       chart.removeAttribute('hidden');
       $('chart-wrap').setAttribute('aria-busy', 'false');
@@ -594,6 +713,7 @@ function scheduleClock(date, currentDay, nextDay, timeZone) {
   clearTimeout(clockTimer);
   if (todayIn(timeZone) !== date) { load(); return; }
   if (currentDay) {
+    setDisplayMode(currentDay, currentLocation.name);
     updateHeading(currentDay, nextDay);
     if (!chartPreview) updateCurrentVisual();
   }
