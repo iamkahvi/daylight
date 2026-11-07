@@ -6,20 +6,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
-// Run the real script and its declarations, but not the final network-backed load.
-assert.match(source, /\nload\(\);\s*$/);
-const withoutLoad = source.replace(/\nload\(\);\s*$/, '\n');
+const scripts = ['solar.js', 'period.js', 'chart.js'].map((file) => ({
+  file,
+  source: fs.readFileSync(path.join(__dirname, '..', file), 'utf8')
+}));
 const epoch = Date.parse('2025-06-21T12:00:00Z');
 const hour = 3600;
 
-function element({ hidden = false, clientWidth = 0, offsetWidth = 0 } = {}) {
+function element({ hidden = false, clientWidth = 0, offsetWidth = 0, ownerDocument } = {}) {
   const attributes = new Map();
   const classes = new Set();
   const properties = new Map();
   const handlers = new Map();
   const el = {
-    hidden, clientWidth, offsetWidth, textContent: '', children: [],
+    hidden, clientWidth, offsetWidth, textContent: '', children: [], ownerDocument,
     style: {
       setProperty(name, value) { properties.set(name, String(value)); },
       getPropertyValue(name) { return properties.get(name) || ''; },
@@ -43,12 +43,27 @@ function element({ hidden = false, clientWidth = 0, offsetWidth = 0 } = {}) {
       handlers.get(type).push(fn);
     },
     dispatch(type, event = {}) { for (const fn of handlers.get(type) || []) fn(event); },
+    focus() {
+      if (!this.ownerDocument || this.ownerDocument.activeElement === this) return;
+      this.ownerDocument.activeElement?.blur();
+      this.ownerDocument.activeElement = this;
+      this.dispatch('focus');
+    },
+    blur() {
+      if (!this.ownerDocument || this.ownerDocument.activeElement !== this) return;
+      this.ownerDocument.activeElement = this.ownerDocument.body;
+      this.dispatch('blur');
+    },
     append(...children) { this.children.push(...children); },
-    replaceChildren(...children) { this.children = children; },
+    replaceChildren(...children) {
+      const active = this.ownerDocument?.activeElement;
+      if (active && this.contains(active)) active.blur();
+      this.children = children;
+    },
     getBoundingClientRect() { return { left: 0, width: 700, height: 374 }; },
     getBBox() { return { x: Number(this.getAttribute('x')) - 40, width: 80 }; },
     getComputedTextLength() { return 80; },
-    contains() { return false; }
+    contains(node) { return this === node || this.children.some((child) => child.contains(node)); }
   };
   return el;
 }
@@ -76,32 +91,36 @@ function setup({ reduced = false, touchFirst = false, textBounds = 'normal' } = 
     static now() { return epoch + time; }
   }
 
-  const ids = Object.fromEntries([
-    'location-input', 'location-clear', 'location-dropdown', 'chart', 'chart-wrap', 'chart-detail', 'chart-title', 'chart-description', 'chart-toggle', 'app-title', 'retry',
-    'period-marker', 'period-start-point', 'period-end-point', 'period-start-label', 'period-end-label',
-    'period-start-time', 'period-end-time', 'duration', 'period-state', 'period-detail'
-  ].map((id) => [id, element({ hidden: id === 'period-marker' || id.endsWith('-point') })]));
-  const visual = element({ clientWidth: 700 });
-  const duration = element({ offsetWidth: 120 });
-  const fill = element({ hidden: true });
-  const curve = element({ hidden: true });
-  fill.setAttribute('d', 'M130 118 Q350 -60 570 118 Z');
-  curve.setAttribute('d', 'M130 118 Q350 -60 570 118');
-  const selectors = {
-    '.location-control': element(), '.period-visual': visual, '.period-duration': duration,
-    '.period-fill': fill, '.period-curve': curve
-  };
+  let activeElement;
   const document = {
+    get activeElement() { return activeElement || this.body; },
+    set activeElement(value) { activeElement = value; },
     getElementById(id) { assert.ok(ids[id], `unexpected element id: ${id}`); return ids[id]; },
     querySelector(selector) { assert.ok(selectors[selector], `unexpected selector: ${selector}`); return selectors[selector]; },
     querySelectorAll(selector) { assert.equal(selector, '.period-arc'); return [fill, curve]; },
     createElementNS() {
-      const el = element();
+      const el = element({ ownerDocument: document });
       if (textBounds === 'zero') el.getBBox = () => ({ x: 0, width: 0 });
       if (textBounds === 'error') el.getBBox = () => { throw new Error('SVG is not rendered'); };
       return el;
     },
     addEventListener() {}
+  };
+  document.body = element({ ownerDocument: document });
+  const ids = Object.fromEntries([
+    'location-input', 'location-clear', 'location-dropdown', 'chart', 'chart-wrap', 'chart-detail', 'chart-title', 'chart-description', 'chart-toggle', 'app-title', 'retry',
+    'period-marker', 'period-start-point', 'period-end-point', 'period-start-label', 'period-end-label',
+    'period-start-time', 'period-end-time', 'duration', 'period-state', 'period-detail'
+  ].map((id) => [id, element({ hidden: id === 'period-marker' || id.endsWith('-point'), ownerDocument: document })]));
+  const visual = element({ clientWidth: 700, ownerDocument: document });
+  const duration = element({ offsetWidth: 120, ownerDocument: document });
+  const fill = element({ hidden: true, ownerDocument: document });
+  const curve = element({ hidden: true, ownerDocument: document });
+  fill.setAttribute('d', 'M130 118 Q350 -60 570 118 Z');
+  curve.setAttribute('d', 'M130 118 Q350 -60 570 118');
+  const selectors = {
+    '.location-control': element({ ownerDocument: document }), '.period-visual': visual, '.period-duration': duration,
+    '.period-fill': fill, '.period-curve': curve
   };
   const performance = { now: () => time };
   const window = {
@@ -119,40 +138,52 @@ function setup({ reduced = false, touchFirst = false, textBounds = 'normal' } = 
     ResizeObserver: class { observe() {} }, URLSearchParams,
     fetch() { throw new Error('The arc test must not access the network'); }
   });
-  vm.runInContext(withoutLoad, context, { filename: 'app.js' });
+  for (const { file, source } of scripts) vm.runInContext(source, context, { filename: file });
+
+  const solar = window.DaylightSolar;
+  const period = window.DaylightPeriod.createPeriodView();
+  let updateCurrentVisual = () => period.update(null, null, null, 'UTC');
+  const chart = window.DaylightChart.createChart({
+    onPreview: (day, timeZone, night) => period.update(day, null, null, timeZone, true, night),
+    onCurrent: () => updateCurrentVisual()
+  });
+  const setMode = (day) => {
+    const isUp = solar.sunIsUp(day);
+    if (isUp === null) return;
+    const night = !isUp;
+    ids['app-title'].textContent = night ? 'nighttime hours' : 'daylight hours';
+    ids['chart-title'].textContent = night ? 'the year at night' : 'the year in daylight';
+    document.title = `${night ? 'nighttime' : 'daylight'} - test city`;
+    chart.setMode(night);
+  };
 
   return {
     ids, visual, fill, curve, mediaQueries,
-    formatTime: (timestamp, timeZone) => context.formatTime(timestamp, timeZone),
-    formatDuration: (seconds) => context.formatDuration(seconds),
-    formatDurationDifference: (seconds, todaySeconds) => context.formatDurationDifference(seconds, todaySeconds),
-    sunIsUp: (day, now) => context.sunIsUp(day, now),
-    nightFor: (days, index) => context.nightFor(days, index),
-    setMode: (day) => context.setDisplayMode(day, 'Test City'),
+    activeElement: () => document.activeElement,
+    formatTime: (timestamp, timeZone) => solar.formatTime(timestamp, timeZone),
+    formatDuration: (seconds) => solar.formatDuration(seconds),
+    formatDurationDifference: (seconds, todaySeconds) => solar.formatDurationDifference(seconds, todaySeconds),
+    sunIsUp: (day, now) => solar.sunIsUp(day, now),
+    nightFor: (days, index) => solar.nightFor(days, index),
+    setMode,
     title: () => document.title,
     setCurrent(day, previous = null, next = null) {
-      context.__currentDay = day;
-      context.__previousDay = previous;
-      context.__nextDay = next;
-      vm.runInContext(`updateCurrentVisual = () => updateDaylightVisual(__currentDay, __previousDay, __nextDay, 'UTC');
-        updateCurrentVisual();`, context);
+      updateCurrentVisual = () => period.update(day, previous, next, 'UTC');
+      updateCurrentVisual();
     },
-    refreshCurrent() { vm.runInContext('updateCurrentVisual()', context); },
+    refreshCurrent() { updateCurrentVisual(); },
     update(day, previous = null, next = null, preview = false) {
       lastUpdateTime = (epoch + time) / 1000;
-      context.updateDaylightVisual(day, previous, next, 'UTC', preview);
+      period.update(day, previous, next, 'UTC', preview);
     },
     renderChart(days, current, followingDay = null) {
-      context.__testDays = days;
-      context.__testCurrent = current;
-      context.__followingDay = followingDay;
-      vm.runInContext(`updateCurrentVisual = () => updateDaylightVisual(__testCurrent, null, null, 'UTC');
-        renderChart(__testDays, __testCurrent.date, 'UTC', undefined, __followingDay);`, context);
+      updateCurrentVisual = () => period.update(current, null, null, 'UTC');
+      chart.setData(days, current.date, 'UTC', followingDay);
       const hitArea = ids.chart.children.find((child) => child.getAttribute('class') === 'chart-hit');
       assert.ok(hitArea, 'chart has an interactive hit area');
       return hitArea;
     },
-    redrawChart() { vm.runInContext('redrawChart()', context); },
+    redrawChart() { chart.redraw(); },
     chartHit() { return ids.chart.children.find((child) => child.getAttribute('class') === 'chart-hit'); },
     setReduced(value) { motion.matches = value; for (const fn of listeners) fn({ matches: value, media: '(prefers-reduced-motion: reduce)' }); },
     pending: () => frames.size,
@@ -1035,6 +1066,25 @@ test('reduced motion snaps the hover line to today and hides it, including mid-r
     app.tick(1000);
     assertLine(cursor, chartXs[2], 'hidden');
   }
+});
+
+test('chart redraw preserves the focused date selection and restores focus to the new hit area', () => {
+  const app = setup();
+  const current = day(8);
+  const days = ['20', '21', '22', '23', '24'].map((date) => ({ ...current, date: `2025-06-${date}` }));
+  const oldHit = app.renderChart(days, days[2]);
+  oldHit.focus();
+  key(oldHit, 'End');
+  assert.equal(app.ids['chart-detail'].textContent, 'Jun 24', 'keyboard selection chooses the last date');
+  assert.equal(app.activeElement(), oldHit, 'the original hit area has focus before redraw');
+
+  app.redrawChart();
+
+  const newHit = app.chartHit();
+  assert.notEqual(newHit, oldHit, 'redraw replaces the hit area');
+  assert.equal(app.ids['chart-detail'].textContent, 'Jun 24', 'redraw preserves the selected date');
+  assert.equal(newHit.getAttribute('aria-valuenow'), '5', 'the replacement hit area exposes the preserved selection');
+  assert.equal(app.activeElement(), newHit, 'focus moves to the replacement hit area');
 });
 
 test('chart redraw cancels the old hover-line animation', () => {

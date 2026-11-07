@@ -1,0 +1,12 @@
+{
+  "name": "daylight",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.js",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

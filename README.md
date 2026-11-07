@@ -14,13 +14,23 @@ The theme follows your system setting until you use the button in the top right.
 
 ## Start the app
 
-1. Start a static web server in the project directory. For example:
+To run the unbuilt source, start a static web server in the project directory:
 
-   ```sh
-   python3 -m http.server 8000
-   ```
+```sh
+python3 -m http.server 8000
+```
 
-2. Open <http://localhost:8000> in a browser. No API key is required.
+Open <http://localhost:8000>. No API key or build step is required.
+
+For a minified production build, install the development dependency and build:
+
+```sh
+npm ci
+npm run build
+python3 -m http.server 8000 --directory dist
+```
+
+Deploy the contents of `dist/` to any static host. The build does not require a server at runtime; configure the host to serve gzip or Brotli if compressed transfers are desired.
 
 ## Data
 
@@ -28,6 +38,13 @@ Open-Meteo supplies yesterday, today and tomorrow from its forecast API and the 
 
 The sunrise and sunset times are astronomical. Clouds do not change these times. Providers use different locations and algorithms, so times can differ slightly. The chart uses the same data as the card for today. Gaps show days without sunrise or sunset.
 
-Provider adapters live in `providers.js`. To add a provider, implement `getDays(start, end, location, signal, kind)` returning one `{ date, sunrise, sunset, duration }` per local date, with event timestamps and duration in seconds. Return null events and a duration of 0 or 86400 for polar night or day; if only one event occurs, return null for the other event and duration. Add the adapter to the appropriate ordered fallback list in `load()` in `app.js`. Failed, timed-out or incomplete responses move to the next provider; changing location cancels outstanding requests.
+Provider adapters live in `providers.js`. To add a provider, implement `getDays(start, end, location, signal, kind)` returning one `{ date, sunrise, sunset, duration }` per local date, with event timestamps and duration in seconds. Return null events and a duration of 0 or 86400 for polar night or day; if only one event occurs, return null for the other event and duration. Add the adapter to the ordered fallback list in `app.js`. Failed, timed-out or incomplete responses move to the next provider; changing location cancels outstanding requests.
 
-Run the tests with `node --test test/*.test.js`.
+## Code structure
+
+- `app.js` coordinates the location, clock, and independent forecast and annual loading states.
+- `solar.js` contains date, time, and solar-period calculations; `providers.js` normalizes and fetches data.
+- `period.js` renders and animates the current or previewed period; `chart.js` owns chart rendering and exploration state.
+- `location.js` owns the search and URL selection flow. `theme.js` runs before the page renders to apply the saved or system theme.
+
+The scripts are loaded in dependency order by `index.html` and run directly from static files. Run the tests with `node --test test/*.test.js` or `npm test`.
